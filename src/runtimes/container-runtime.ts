@@ -9,7 +9,7 @@ import os from 'os';
 import { logger } from '../orchestrator/logger.js';
 
 /** The container runtime binary name. */
-export const CONTAINER_RUNTIME_BIN = 'container';
+export const CONTAINER_RUNTIME_BIN: string = 'docker';
 
 /** Hostname containers use to reach the host machine. */
 export const CONTAINER_HOST_GATEWAY =
@@ -73,6 +73,44 @@ export function stopContainer(name: string): string {
 
 /** Ensure the container runtime is running, starting it if needed. */
 export function ensureContainerRuntimeRunning(): void {
+  if (CONTAINER_RUNTIME_BIN === 'docker') {
+    // The Docker CLI has no "start the daemon" subcommand (that's an OS-level
+    // service). If `docker info` fails, the daemon isn't reachable and there's
+    // nothing more the CLI can do — surface instructions instead of retrying.
+    try {
+      execSync('docker info', { stdio: 'pipe' });
+      logger.debug('Container runtime already running');
+    } catch (err) {
+      logger.error({ err }, 'Docker daemon is not reachable');
+      console.error(
+        '\n╔════════════════════════════════════════════════════════════════╗',
+      );
+      console.error(
+        '║  FATAL: Docker daemon is not running                           ║',
+      );
+      console.error(
+        '║                                                                ║',
+      );
+      console.error(
+        '║  Agents cannot run without Docker. To fix:                     ║',
+      );
+      console.error(
+        '║  macOS:  open -a Docker                                        ║',
+      );
+      console.error(
+        '║  Linux:  sudo systemctl start docker                           ║',
+      );
+      console.error(
+        '║  Then restart ClaudeClaw                                       ║',
+      );
+      console.error(
+        '╚════════════════════════════════════════════════════════════════╝\n',
+      );
+      throw new Error('Container runtime is required but failed to start');
+    }
+    return;
+  }
+
   try {
     execSync(`${CONTAINER_RUNTIME_BIN} system status`, { stdio: 'pipe' });
     logger.debug('Container runtime already running');
@@ -118,18 +156,35 @@ export function ensureContainerRuntimeRunning(): void {
 /** Kill orphaned ClaudeClaw containers from previous runs. */
 export function cleanupOrphans(): void {
   try {
-    const output = execSync(`${CONTAINER_RUNTIME_BIN} ls --format json`, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      encoding: 'utf-8',
-    });
-    const containers: { status: string; configuration: { id: string } }[] =
-      JSON.parse(output || '[]');
-    const orphans = containers
-      .filter(
-        (c) =>
-          c.status === 'running' && c.configuration.id.startsWith('claudeclaw-'),
-      )
-      .map((c) => c.configuration.id);
+    let orphans: string[];
+    if (CONTAINER_RUNTIME_BIN === 'docker') {
+      // `docker ps --format json` prints JSON Lines (one object per running
+      // container), not a JSON array like Apple Container's `ls --format json`.
+      const output = execSync('docker ps --format {{json .}}', {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        encoding: 'utf-8',
+      });
+      orphans = output
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as { Names: string; State: string })
+        .filter((c) => c.State === 'running' && c.Names.startsWith('claudeclaw-'))
+        .map((c) => c.Names);
+    } else {
+      const output = execSync(`${CONTAINER_RUNTIME_BIN} ls --format json`, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        encoding: 'utf-8',
+      });
+      const containers: { status: string; configuration: { id: string } }[] =
+        JSON.parse(output || '[]');
+      orphans = containers
+        .filter(
+          (c) =>
+            c.status === 'running' &&
+            c.configuration.id.startsWith('claudeclaw-'),
+        )
+        .map((c) => c.configuration.id);
+    }
     for (const name of orphans) {
       try {
         execSync(stopContainer(name), { stdio: 'pipe' });

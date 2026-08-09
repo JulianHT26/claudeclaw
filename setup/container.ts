@@ -98,13 +98,14 @@ export async function run(args: string[]): Promise<void> {
   const buildCmd =
     runtime === 'apple-container' ? 'container build' : 'docker build';
   const runCmd = runtime === 'apple-container' ? 'container' : 'docker';
+  const dockerfile = path.join('src', 'runtimes', 'docker', 'Dockerfile');
 
   // Build
   let buildOk = false;
   logger.info({ runtime }, 'Building container');
   try {
-    execSync(`${buildCmd} -t ${image} .`, {
-      cwd: path.join(projectRoot, 'container'),
+    execSync(`${buildCmd} -f ${dockerfile} -t ${image} .`, {
+      cwd: projectRoot,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     buildOk = true;
