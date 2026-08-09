@@ -11,7 +11,7 @@ import path from 'path';
 
 import Database from 'better-sqlite3';
 
-import { DATA_DIR, STORE_DIR } from '../src/orchestrator/config.js';
+import { STORE_DIR } from '../src/orchestrator/config.js';
 import { readEnvFile } from '../src/orchestrator/env.js';
 import { logger } from '../src/orchestrator/logger.js';
 import {
@@ -22,8 +22,10 @@ import {
 } from './platform.js';
 import { emitStatus } from './status.js';
 
-// Derive service label from data directory for instance-specific checks
-const SERVICE_DIR_NAME = path.basename(DATA_DIR).replace(/[^a-zA-Z0-9_-]/g, '-');
+// Derive service label the same way setup/service.ts does: from the project
+// directory (CLAUDECLAW_PROJECT_DIR or cwd), not the DATA_DIR (cwd/data).
+const PROJECT_DIR = process.env.CLAUDECLAW_PROJECT_DIR || process.cwd();
+const SERVICE_DIR_NAME = path.basename(PROJECT_DIR).replace(/[^a-zA-Z0-9_-]/g, '-');
 const SERVICE_LABEL = `com.claudeclaw.${SERVICE_DIR_NAME}`;
 const SYSTEMD_UNIT = `claudeclaw-${SERVICE_DIR_NAME}`;
 
