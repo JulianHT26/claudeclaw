@@ -12,3 +12,7 @@ extensions/
 
 # Brainstorm sessions
 .superpowers/
+
+# Permisos locales de Claude Code (auto-aprobaciones acumuladas por sesión,
+# no una decisión de equipo) — settings.json compartido sí se versiona.
+.claude/settings.local.json
