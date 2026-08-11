@@ -247,33 +247,63 @@ export class WhatsAppChannel implements Channel {
     });
   }
 
+  // WhatsApp (via Baileys, unofficial) can silently drop very long single
+  // text messages without throwing an error. Chunking below this size
+  // avoids that failure mode. See: incident 2026-08, 25KB message lost.
+  private static readonly MAX_CHUNK_SIZE = 3500;
+  private static readonly CHUNK_DELAY_MS = 800;
+
+  private splitIntoChunks(text: string, maxLen = WhatsAppChannel.MAX_CHUNK_SIZE): string[] {
+    if (text.length <= maxLen) return [text];
+    const chunks: string[] = [];
+    let remaining = text;
+    while (remaining.length > maxLen) {
+      let cut = remaining.lastIndexOf('\n', maxLen);
+      if (cut < maxLen * 0.5) cut = remaining.lastIndexOf(' ', maxLen);
+      if (cut < maxLen * 0.5) cut = maxLen;
+      chunks.push(remaining.slice(0, cut));
+      remaining = remaining.slice(cut).trimStart();
+    }
+    if (remaining.length > 0) chunks.push(remaining);
+    return chunks;
+  }
+
   async sendMessage(jid: string, text: string): Promise<void> {
     // Prefix bot messages with assistant name so users know who's speaking.
     // On a shared number, prefix is also needed in DMs (including self-chat)
     // to distinguish bot output from user messages.
     // Skip only when the assistant has its own dedicated phone number.
-    const prefixed = ASSISTANT_HAS_OWN_NUMBER
-      ? text
-      : `[${ASSISTANT_NAME}] 🧊 ${text}`;
+    const basePrefix = ASSISTANT_HAS_OWN_NUMBER ? '' : `[${ASSISTANT_NAME}] 🧊 `;
 
-    if (!this.connected) {
-      this.outgoingQueue.push({ jid, text: prefixed });
-      logger.info(
-        { jid, length: prefixed.length, queueSize: this.outgoingQueue.length },
-        'WA disconnected, message queued',
-      );
-      return;
-    }
-    try {
-      await this.sock.sendMessage(jid, { text: prefixed });
-      logger.info({ jid, length: prefixed.length }, 'Message sent');
-    } catch (err) {
-      // If send fails, queue it for retry on reconnect
-      this.outgoingQueue.push({ jid, text: prefixed });
-      logger.warn(
-        { jid, err, queueSize: this.outgoingQueue.length },
-        'Failed to send, message queued',
-      );
+    const rawChunks = this.splitIntoChunks(text);
+    const multi = rawChunks.length > 1;
+
+    for (let i = 0; i < rawChunks.length; i++) {
+      const partLabel = multi ? ` (${i + 1}/${rawChunks.length})` : '';
+      const chunk = `${basePrefix}${rawChunks[i]}${multi ? partLabel : ''}`;
+
+      if (!this.connected) {
+        this.outgoingQueue.push({ jid, text: chunk });
+        logger.info(
+          { jid, length: chunk.length, queueSize: this.outgoingQueue.length, part: i + 1, of: rawChunks.length },
+          'WA disconnected, message queued',
+        );
+        continue;
+      }
+      try {
+        await this.sock.sendMessage(jid, { text: chunk });
+        logger.info({ jid, length: chunk.length, part: i + 1, of: rawChunks.length }, 'Message sent');
+        if (multi && i < rawChunks.length - 1) {
+          await new Promise((r) => setTimeout(r, WhatsAppChannel.CHUNK_DELAY_MS));
+        }
+      } catch (err) {
+        // If send fails, queue it for retry on reconnect
+        this.outgoingQueue.push({ jid, text: chunk });
+        logger.warn(
+          { jid, err, queueSize: this.outgoingQueue.length, part: i + 1, of: rawChunks.length },
+          'Failed to send, message queued',
+        );
+      }
     }
   }
 
