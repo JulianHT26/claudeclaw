@@ -291,7 +291,9 @@ export class WhatsAppChannel implements Channel {
         continue;
       }
       try {
-        await this.sock.sendMessage(jid, { text: chunk });
+        // linkPreview: null disables Baileys' automatic preview generation
+        // (link-preview-js has an unpatched SSRF advisory — GHSA-4gp8-rjrq-ch6q).
+        await this.sock.sendMessage(jid, { text: chunk, linkPreview: null });
         logger.info({ jid, length: chunk.length, part: i + 1, of: rawChunks.length }, 'Message sent');
         if (multi && i < rawChunks.length - 1) {
           await new Promise((r) => setTimeout(r, WhatsAppChannel.CHUNK_DELAY_MS));
@@ -413,8 +415,9 @@ export class WhatsAppChannel implements Channel {
       );
       while (this.outgoingQueue.length > 0) {
         const item = this.outgoingQueue.shift()!;
-        // Send directly — queued items are already prefixed by sendMessage
-        await this.sock.sendMessage(item.jid, { text: item.text });
+        // Send directly — queued items are already prefixed by sendMessage.
+        // linkPreview: null keeps automatic preview generation disabled here too.
+        await this.sock.sendMessage(item.jid, { text: item.text, linkPreview: null });
         logger.info(
           { jid: item.jid, length: item.text.length },
           'Queued message sent',
