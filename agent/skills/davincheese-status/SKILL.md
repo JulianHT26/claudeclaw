@@ -31,6 +31,7 @@ pedís uno que no está en esta lista el bridge lo rechaza):
 `svc_status`, `svc_list`, `svc_timers`, `fw_status`,
 `health_api`, `health_admin`, `health_status`, `cert_check`,
 `claudeclaw_status`, `git_davincheese`, `git_claudeclaw`, `backup_check`,
+`reports_ventas_hoy` (usá el skill `davincheese-ventas` para este, no lo pidas desde acá),
 `restart_api`, `restart_worker`, `restart_fudo_bot`, `restart_uptime` (⚠️ ver más abajo — nunca uses estos sin autorización explícita del usuario en el mensaje).
 
 ## Para el reporte de estado general ("¿cómo está Da Vincheese?")
