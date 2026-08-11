@@ -160,7 +160,10 @@ export function cleanupOrphans(): void {
     if (CONTAINER_RUNTIME_BIN === 'docker') {
       // `docker ps --format json` prints JSON Lines (one object per running
       // container), not a JSON array like Apple Container's `ls --format json`.
-      const output = execSync('docker ps --format {{json .}}', {
+      // The format spec must be quoted: execSync runs this through a shell,
+      // and the unquoted space inside `{{json .}}` gets word-split into a
+      // second (invalid) positional arg, which `docker ps` rejects.
+      const output = execSync("docker ps --format '{{json .}}'", {
         stdio: ['pipe', 'pipe', 'pipe'],
         encoding: 'utf-8',
       });
