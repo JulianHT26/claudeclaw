@@ -34,7 +34,7 @@ pedís uno que no está en esta lista el bridge lo rechaza):
 `reports_ventas_hoy`, `reports_ventas_ayer`, `reports_ventas_semana`, `reports_ventas_mes` (usá el skill `davincheese-ventas` para estos, no los pidas desde acá),
 `reports_consumo_hoy`, `reports_consumo_ayer`, `reports_consumo_semana`, `reports_consumo_mes` (usá el skill `davincheese-inventario` para estos, no los pidas desde acá),
 `reports_rentabilidad_hoy`, `reports_rentabilidad_ayer`, `reports_rentabilidad_semana`, `reports_rentabilidad_mes` (usá el skill `davincheese-rentabilidad` para estos, no los pidas desde acá),
-`reports_marketing_hoy`, `reports_marketing_ayer`, `reports_marketing_semana`, `reports_marketing_mes` (usá el skill `davincheese-marketing` para estos, no los pidas desde acá),
+`reports_marketing_hoy`, `reports_marketing_ayer`, `reports_marketing_semana`, `reports_marketing_mes`, `reports_marketing_correlacion` (usá el skill `davincheese-marketing` para estos, no los pidas desde acá),
 `restart_api`, `restart_worker`, `restart_fudo_bot`, `restart_uptime` (⚠️ ver más abajo — nunca uses estos sin autorización explícita del usuario en el mensaje).
 
 ## Para el reporte de estado general ("¿cómo está Da Vincheese?")

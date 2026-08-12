@@ -1,6 +1,6 @@
 ---
 name: davincheese-marketing
-description: Reporta gasto e impacto de las campañas de Meta Ads (Facebook/Instagram) de Da Vincheese — gasto, compras atribuidas, ROAS reportado por Meta, top campañas — para hoy, ayer, la semana o el mes. Usar ante "¿cómo van las pautas/campañas?", "¿cuánto gastamos en publicidad?", "ROAS de Meta", "¿qué campaña anda mejor?".
+description: Reporta gasto e impacto de las campañas de Meta Ads (Facebook/Instagram) de Da Vincheese — gasto, compras atribuidas, ROAS reportado por Meta, top campañas, y la correlación entre gasto en pauta y ventas reales de Fudo — para hoy, ayer, la semana o el mes. Usar ante "¿cómo van las pautas/campañas?", "¿cuánto gastamos en publicidad?", "ROAS de Meta", "¿qué campaña anda mejor?", "¿la pauta realmente está generando ventas?".
 ---
 
 # Marketing / Meta Ads (Da Vincheese)
@@ -20,12 +20,14 @@ ni para decidir cambios de presupuesto.
 `comprasAtribuidas`/`valorAtribuido`/`roas` son la **atribución propia de
 Meta** — su ventana de atribución y su modelo, conocidos por sobre-atribuir
 conversiones que en realidad no vinieron del anuncio. **No es un cruce
-verificado contra pedidos reales de Fudo** — eso requeriría matchear cliente
-por cliente (`origin=ONLINE-MENU`) contra cada conversión, y todavía no está
-construido. `ventasRealesFudo` se entrega aparte, como contexto del volumen
-total de ventas del período — no lo uses para "calcular" un ROAS más
-preciso vos mismo, ni asumas que la diferencia entre ambos números es
-atribuible a otra causa.
+verificado contra pedidos reales de Fudo** — verificado 2026-08-12: Fudo no
+tiene forma de identificar qué venta vino de un clic de Meta (`origin` del
+cliente viene vacío en el 100% de una muestra de 2.500 clientes reales de
+esta cuenta -- no es algo pendiente de construir, es un dato que
+simplemente no existe ahí). `ventasRealesFudo` se entrega aparte, como
+contexto del volumen total de ventas del período — no lo uses para
+"calcular" un ROAS más preciso vos mismo, ni asumas que la diferencia entre
+ambos números es atribuible a otra causa.
 
 **Siempre que dés el ROAS, aclará que es el que reporta Meta, no un ROAS
 verificado.** No lo presentes como un hecho confirmado.
@@ -84,3 +86,54 @@ Top campaña por gasto: Ventas retargeting Da Vincheese... ($285.000, ROAS 3.1x)
 - No conviertas `porcentajeVentasAtribuidoAMeta` en una conclusión sobre si
   la publicidad "vale la pena" o no — es un dato de contexto, la decisión de
   presupuesto es del usuario (y de `ads-optimizer` si pide ese análisis).
+
+## Correlación gasto vs. ventas reales (`reports_marketing_correlacion`)
+
+Usar cuando pregunten específicamente si la pauta "realmente está
+generando ventas" o algo similar a un ROAS verificado — no es lo mismo que
+el reporte de arriba. Comando: `reports_marketing_correlacion` (sin
+período, usa todo el historial disponible).
+
+```json
+{
+  "disponible": true,
+  "fechaCorte": "2026-08-03T...",
+  "comparacionAntesDepues": {
+    "promedioVentasDiariasAntes": 2100000, "diasAntes": 84,
+    "promedioVentasDiariasDespues": 2450000, "diasDespues": 9,
+    "cambioPct": "16.7",
+    "advertencia": "no aísla el efecto de la pauta de otros cambios..."
+  },
+  "correlacionGastoVentas": {
+    "coeficiente": 0.34, "interpretacion": "débil",
+    "diasConsiderados": 9,
+    "advertencia": "muestra chica..."
+  },
+  "advertenciaGeneral": "Fudo no expone ninguna señal de qué venta vino de un clic de Meta..."
+}
+```
+
+**Explicá siempre las dos advertencias en la respuesta, no solo los
+números** — este reporte existe precisamente porque no se puede calcular
+una atribución exacta, y presentarlo sin ese contexto sería peor que no
+tener el dato. Si `disponible` es `false`, decilo así (todavía no hay
+suficiente historia de Meta sincronizada).
+
+Formato sugerido:
+
+```
+🔍 *META × FUDO — Correlación (no atribución exacta)*
+
+Ventas promedio por día:
+Antes de la pauta (84 días): $2.100.000
+Desde que arrancó la pauta (9 días): $2.450.000
+Diferencia: +16.7%
+⚠️ No aísla otros cambios del mismo período (estacionalidad, menú, etc.)
+
+Correlación gasto-ventas día a día: 0.34 (débil)
+⚠️ Muestra chica (9 días) — señal preliminar, no concluyente.
+
+Fudo no tiene forma de identificar qué venta vino de un clic de Meta
+específico, así que esto es lo más cerca que se puede llegar de "¿la
+pauta funciona?" con los datos disponibles hoy.
+```
