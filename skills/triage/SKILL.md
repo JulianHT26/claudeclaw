@@ -25,10 +25,11 @@ de código, rutas de archivo, ni jerga técnica en la conversación. Nunca.
 4. **Si hace falta un cambio de código** — creá un issue de GitHub con TODO
    el detalle técnico (código, archivos, causa raíz, plan). Avisá al canal
    de dev. Decile al usuario que abriste un issue y que el equipo lo va a
-   revisar e implementar — **no digas que un agente ya está trabajando en
-   el fix ni que va a llegar un PR solo**, eso todavía no existe (la
-   automatización de "implementar y abrir el PR" no está construida, ver
-   `agents/swe.md`).
+   revisar — y ofrecele la opción de que un agente lo intente automático
+   ahora mismo (ver "Si el usuario aprueba" abajo). **No digas que un
+   agente ya está trabajando en el fix ni que va a llegar un PR** a menos
+   que el usuario lo haya pedido explícitamente en este mismo hilo — sin
+   ese pedido, el fix lo revisa un humano, punto.
 5. **Si no hace falta cambio de código** — solo respondé. Listo.
 
 ## Crear un issue de GitHub (solo cuando hace falta un cambio de código)
@@ -48,12 +49,27 @@ cat > /workspace/ipc/swe/issue-$(date +%s).json << EOF
 EOF
 ```
 
-**No uses `queue_swe_task`** -- esa cola existe en el código pero nada la
-procesa (el agente SWE que debería tomarla es un placeholder sin
-implementar). Encolar ahí no hace nada y confundiría al usuario si más
-adelante se activa sin que él lo sepa.
+Decile al usuario: "Abrí un issue para esto y el equipo lo va a revisar. Si
+querés que un agente intente el fix automáticamente ahora (branch + PR
+para que lo revisemos, nunca se mergea solo), respondé que sí acá."
 
-Decile al usuario: "Abrí un issue para esto y el equipo lo va a revisar."
+## Si el usuario aprueba el intento automático
+
+Solo si el usuario responde afirmativamente **en este mismo hilo**, después
+de haber creado el issue -- nunca por iniciativa propia. Encolá el trabajo
+con `queue_swe_task`:
+
+```bash
+cat > /workspace/ipc/swe/queue-$(date +%s).json << EOF
+{"type": "queue_swe_task", "recordId": "<número o id del issue>", "listId": "", "threadJid": "<jid de este hilo>", "taskType": "<fix o feature según el label>", "description": "<el mismo detalle técnico completo que pusiste en el issue>"}
+EOF
+```
+
+Ya tenés todo ese detalle en este mismo turno porque lo acabás de escribir
+en el issue -- no hace falta volver a investigar nada. Decile al usuario
+que lo vas a intentar y que le vas a avisar cuando esté el PR (o si no se
+pudo). Si el usuario NO aprueba (o no responde nada), no encoles nada --
+el issue queda para revisión humana como siempre.
 
 ## Herramientas de investigación
 
@@ -69,4 +85,7 @@ Decile al usuario: "Abrí un issue para esto y el equipo lo va a revisar."
 - Si no estás seguro, preguntale al usuario para aclarar.
 - Nunca modificar datos de producción.
 - No prometer que el fix se va a implementar solo ni que va a aparecer un
-  PR -- eso es trabajo humano hoy.
+  PR -- eso solo pasa si el usuario lo pide explícitamente después del
+  issue. Sin ese pedido, es trabajo humano.
+- El PR que abre el agente automático es siempre para revisión humana --
+  nunca se mergea solo.
