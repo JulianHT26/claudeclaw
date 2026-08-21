@@ -97,6 +97,34 @@ const iaBridgeEnv = readEnvFile(['IA_BRIDGE_PORT', 'IA_BRIDGE_SECRET']);
 export const IA_BRIDGE_PORT = parseInt(process.env.IA_BRIDGE_PORT || iaBridgeEnv.IA_BRIDGE_PORT || '3101', 10);
 export const IA_BRIDGE_SECRET = process.env.IA_BRIDGE_SECRET || iaBridgeEnv.IA_BRIDGE_SECRET || '';
 
+// Puente de validación de comprobantes por reacción en grupo de WhatsApp
+// (ver src/comprobantes-bridge/server.ts) -- davincheese-os publica la foto
+// del comprobante en un grupo real, el equipo reacciona con ✅/❌, y este
+// puente le avisa de vuelta a davincheese-os quién resolvió qué pedido.
+const comprobantesBridgeEnv = readEnvFile([
+  'COMPROBANTES_BRIDGE_PORT',
+  'COMPROBANTES_BRIDGE_SECRET',
+  'COMPROBANTES_GRUPO_JID',
+  'DAVINCHEESE_COMPROBANTE_WEBHOOK_URL',
+  'DAVINCHEESE_COMPROBANTE_WEBHOOK_SECRET',
+]);
+export const COMPROBANTES_BRIDGE_PORT = parseInt(
+  process.env.COMPROBANTES_BRIDGE_PORT || comprobantesBridgeEnv.COMPROBANTES_BRIDGE_PORT || '3102',
+  10,
+);
+export const COMPROBANTES_BRIDGE_SECRET =
+  process.env.COMPROBANTES_BRIDGE_SECRET || comprobantesBridgeEnv.COMPROBANTES_BRIDGE_SECRET || '';
+export const COMPROBANTES_GRUPO_JID =
+  process.env.COMPROBANTES_GRUPO_JID || comprobantesBridgeEnv.COMPROBANTES_GRUPO_JID || '';
+export const DAVINCHEESE_COMPROBANTE_WEBHOOK_URL =
+  process.env.DAVINCHEESE_COMPROBANTE_WEBHOOK_URL ||
+  comprobantesBridgeEnv.DAVINCHEESE_COMPROBANTE_WEBHOOK_URL ||
+  '';
+export const DAVINCHEESE_COMPROBANTE_WEBHOOK_SECRET =
+  process.env.DAVINCHEESE_COMPROBANTE_WEBHOOK_SECRET ||
+  comprobantesBridgeEnv.DAVINCHEESE_COMPROBANTE_WEBHOOK_SECRET ||
+  '';
+
 // Runtime selection: 'container' (default, Apple Container / Docker) or 'sandbox' (srt)
 export const DEFAULT_RUNTIME: 'container' | 'sandbox' =
   (process.env.RUNTIME || envConfig.RUNTIME || 'container') === 'sandbox'

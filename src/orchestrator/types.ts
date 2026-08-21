@@ -103,6 +103,13 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
+  // Optional: send an image with a caption. Returns the sent message's id
+  // (needed to correlate a later reaction to it), or null on failure. Only
+  // channels that support media implement this (WhatsApp does).
+  sendImage?(jid: string, buffer: Buffer, caption: string): Promise<string | null>;
+  // Optional: register a callback for incoming reactions to messages this
+  // channel sent. Only channels that support reactions implement this.
+  onReaction?(handler: (evt: ReactionEvent) => void): void;
 }
 
 // --- Message routing ---
@@ -155,6 +162,16 @@ export interface MessageRouter {
 
 // Callback type that channels use to deliver inbound messages
 export type OnInboundMessage = (chatJid: string, message: NewMessage) => void;
+
+// A reaction (emoji) added to a message the channel previously sent.
+// text is '' when the reaction was removed -- callers should ignore those.
+export interface ReactionEvent {
+  chatJid: string;
+  targetMessageId: string;
+  emoji: string;
+  reactorJid: string;
+  reactorName: string;
+}
 
 // Callback for chat metadata discovery.
 // name is optional — channels that deliver names inline (Telegram) pass it here;

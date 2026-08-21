@@ -23,6 +23,7 @@ import {
   Channel,
   OnInboundMessage,
   OnChatMetadata,
+  ReactionEvent,
   RegisteredGroup,
 } from '../orchestrator/types.js';
 import { registerChannel, ChannelOpts } from '../orchestrator/channel-registry.js';
@@ -44,6 +45,7 @@ export class WhatsAppChannel implements Channel {
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
   private groupSyncTimerStarted = false;
+  private reactionHandler: ((evt: ReactionEvent) => void) | null = null;
 
   private opts: WhatsAppChannelOpts;
 
@@ -245,6 +247,41 @@ export class WhatsAppChannel implements Channel {
         }
       }
     });
+
+    // Reactions to messages this account sent (ej. ✅/❌ en el grupo de
+    // comprobantes, ver comprobantes-bridge/server.ts). No filtra por
+    // grupo/registro acá -- eso es responsabilidad de quien se suscriba con
+    // onReaction, este canal solo reenvía el evento crudo.
+    //
+    // OJO con las keys (ver Baileys, Utils/process-message.js): Baileys arma
+    // el item así -- `item.key` es la key del mensaje ORIGINAL que se
+    // reaccionó (el que nos interesa acá), mientras que `item.reaction.key`
+    // es la key del mensaje-envoltorio de la reacción en sí (de quien
+    // reaccionó) -- al revés de lo que el nombre sugiere a primera vista.
+    this.sock.ev.on('messages.reaction', (reactions) => {
+      for (const item of reactions) {
+        try {
+          if (!this.reactionHandler) continue;
+          const emoji = item.reaction?.text ?? '';
+          const chatJid = item.key?.remoteJid;
+          const targetMessageId = item.key?.id;
+          if (!chatJid || !targetMessageId || !emoji) continue; // '' = reacción removida, se ignora
+
+          const reactorJid = item.reaction?.key?.participant || item.reaction?.key?.remoteJid || '';
+          const reactorName = reactorJid.split('@')[0];
+
+          this.reactionHandler({ chatJid, targetMessageId, emoji, reactorJid, reactorName });
+        } catch (err) {
+          logger.error({ err }, 'Error processing incoming reaction');
+        }
+      }
+    });
+  }
+
+  /** Ver ReactionEvent -- solo un handler a la vez (un único consumidor,
+   * comprobantes-bridge/server.ts, no hace falta una lista). */
+  onReaction(handler: (evt: ReactionEvent) => void): void {
+    this.reactionHandler = handler;
   }
 
   // WhatsApp (via Baileys, unofficial) can silently drop very long single
@@ -306,6 +343,27 @@ export class WhatsAppChannel implements Channel {
           'Failed to send, message queued',
         );
       }
+    }
+  }
+
+  /** Envía una imagen con caption -- a diferencia de sendMessage, no encola
+   * si está desconectado ni reintenta: el caller (comprobantes-bridge) tiene
+   * que poder tratar el fallo como "no se pudo publicar, escalar directo"
+   * al toque, no esperar a un reconnect. Devuelve el id del mensaje enviado
+   * (para correlacionar la reacción que llegue después) o null si falló. */
+  async sendImage(jid: string, buffer: Buffer, caption: string): Promise<string | null> {
+    if (!this.connected) {
+      logger.warn({ jid }, 'sendImage: WhatsApp desconectado, no se envía');
+      return null;
+    }
+    try {
+      const sent = await this.sock.sendMessage(jid, { image: buffer, caption });
+      const id = sent?.key?.id ?? null;
+      logger.info({ jid, id }, 'Imagen enviada');
+      return id;
+    } catch (err) {
+      logger.error({ jid, err }, 'Fallo enviando imagen');
+      return null;
     }
   }
 

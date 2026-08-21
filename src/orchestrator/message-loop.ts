@@ -14,6 +14,8 @@ import {
   WEBHOOK_SECRET,
   IA_BRIDGE_PORT,
   IA_BRIDGE_SECRET,
+  COMPROBANTES_BRIDGE_PORT,
+  COMPROBANTES_BRIDGE_SECRET,
 } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
 import {
@@ -79,6 +81,7 @@ import { logger } from './logger.js';
 import { logAgentRun } from '../cost-tracking/index.js';
 import { startWebhookServer } from '../webhook/server.js';
 import { startIaBridgeServer } from '../ia-bridge/server.js';
+import { startComprobantesBridgeServer } from '../comprobantes-bridge/server.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -813,6 +816,17 @@ export async function main(): Promise<void> {
   // ver src/ia-bridge/server.ts.
   if (IA_BRIDGE_SECRET) {
     startIaBridgeServer(IA_BRIDGE_PORT, IA_BRIDGE_SECRET);
+  }
+  // Validación de comprobantes por reacción en grupo real de WhatsApp -- ver
+  // src/comprobantes-bridge/server.ts. Necesita el canal de WhatsApp ya
+  // conectado (sendImage/onReaction), no un agente ni el router de mensajes.
+  if (COMPROBANTES_BRIDGE_SECRET) {
+    const whatsapp = channels.find((ch) => ch.name === 'whatsapp');
+    if (whatsapp) {
+      startComprobantesBridgeServer(COMPROBANTES_BRIDGE_PORT, COMPROBANTES_BRIDGE_SECRET, whatsapp);
+    } else {
+      logger.warn('COMPROBANTES_BRIDGE_SECRET configurado pero el canal de WhatsApp no está activo -- omitiendo');
+    }
   }
 
   queue.setProcessMessagesFn((chatJid) => processGroupMessages(chatJid, router));

@@ -86,6 +86,16 @@ function createSchema(
       requires_trigger INTEGER DEFAULT 1
     );
 
+    -- Correlaciona un mensaje enviado al grupo de comprobantes (ver
+    -- comprobantes-bridge/server.ts) con el pedido de davincheese-os al que
+    -- pertenece, para saber a quién avisar cuando llegue una reacción ✅/❌.
+    CREATE TABLE IF NOT EXISTS comprobante_tracking (
+      whatsapp_message_id TEXT PRIMARY KEY,
+      order_id TEXT NOT NULL,
+      resolved INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+
   `);
 
   // Run plugin DB schema (plugins register on import before DB init)
@@ -554,6 +564,31 @@ export function getAllSessions(): Record<string, string> {
     result[row.group_folder] = row.session_id;
   }
   return result;
+}
+
+// --- Comprobante tracking (ver comprobantes-bridge/server.ts) ---
+
+export function trackComprobanteMessage(whatsappMessageId: string, orderId: string): void {
+  db.prepare(
+    `INSERT OR REPLACE INTO comprobante_tracking (whatsapp_message_id, order_id, resolved, created_at)
+     VALUES (?, ?, 0, ?)`,
+  ).run(whatsappMessageId, orderId, new Date().toISOString());
+}
+
+/** Marca el tracking como resuelto SOLO si todavía no lo estaba (el UPDATE
+ * con "AND resolved = 0" es atómico) -- así, si dos personas reaccionan casi
+ * al mismo tiempo, solo la primera dispara el aviso a davincheese-os.
+ * Devuelve el orderId si ESTA llamada fue la que resolvió, o null si no
+ * había tracking para ese mensaje o ya estaba resuelto por otra reacción. */
+export function resolveComprobanteTracking(whatsappMessageId: string): string | null {
+  const row = db
+    .prepare('SELECT order_id FROM comprobante_tracking WHERE whatsapp_message_id = ?')
+    .get(whatsappMessageId) as { order_id: string } | undefined;
+  if (!row) return null;
+  const result = db
+    .prepare('UPDATE comprobante_tracking SET resolved = 1 WHERE whatsapp_message_id = ? AND resolved = 0')
+    .run(whatsappMessageId);
+  return result.changes === 1 ? row.order_id : null;
 }
 
 // --- Registered group accessors ---
