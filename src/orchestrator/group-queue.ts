@@ -48,6 +48,7 @@ export class GroupQueue {
   private waitingGroups: string[] = [];
   private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
     null;
+  private onMaxRetriesExceeded: ((groupJid: string) => void) | null = null;
   private shuttingDown = false;
 
   private getGroup(groupJid: string): GroupState {
@@ -73,6 +74,14 @@ export class GroupQueue {
 
   setProcessMessagesFn(fn: (groupJid: string) => Promise<boolean>): void {
     this.processMessagesFn = fn;
+  }
+
+  /** Called once per exhaustion cycle (not per-retry) when a group gives up
+   * after MAX_RETRIES failures -- lets the caller notify the chat instead of
+   * failing silently (previously this only logged 'Max retries exceeded'
+   * and the user had no way to know the agent had stopped responding). */
+  setOnMaxRetriesExceeded(fn: (groupJid: string) => void): void {
+    this.onMaxRetriesExceeded = fn;
   }
 
   enqueueMessageCheck(groupJid: string): void {
@@ -251,6 +260,13 @@ export class GroupQueue {
     if (state.retryCount > MAX_RETRIES) {
       logger.error({ groupJid }, 'Max retries exceeded');
       state.retryCount = 0;
+      if (this.onMaxRetriesExceeded) {
+        try {
+          this.onMaxRetriesExceeded(groupJid);
+        } catch (err) {
+          logger.error({ groupJid, err }, 'onMaxRetriesExceeded callback failed');
+        }
+      }
       return;
     }
     const delayMs = BASE_RETRY_MS * Math.pow(2, state.retryCount - 1);

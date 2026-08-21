@@ -10,10 +10,11 @@ Bridge, nunca la Marketing API de Meta ni Postgres directo desde acá.
 
 **Si la pregunta es una auditoría a fondo de campañas** ("¿por qué bajó el
 ROAS?", "¿qué deberíamos hacer con esta campaña?", diagnóstico completo) —
-**no uses este skill**, usá `ads-optimizer` (ya existe en este proyecto,
-estructura la respuesta en las 3 Q's con la metodología completa). Este
-skill es para el número rápido — gasto, compras, ROAS — no para diagnóstico
-ni para decidir cambios de presupuesto.
+**no uses este skill**, usá `davincheese-ads-auditoria` (estructura la
+respuesta en las 3 Q's con semáforo por eslabón del embudo y la matriz de
+decisión de la metodología de Felipe Vergara). Este skill es para el número
+rápido — gasto, compras, ROAS — no para diagnóstico ni para decidir cambios
+de presupuesto.
 
 ## Lo más importante: qué NO es este número
 
@@ -40,10 +41,19 @@ verificado.** No lo presentes como un hecho confirmado.
 | ayer | `reports_marketing_ayer` |
 | esta semana | `reports_marketing_semana` (últimos 7 días rodantes) |
 | este mes | `reports_marketing_mes` (últimos 30 días rodantes) |
+| un rango específico ("del 1 al 15 de agosto", "entre el X y el Y") | `reports_marketing_rango_YYYY-MM-DD_YYYY-MM-DD` (ej. `reports_marketing_rango_2026-08-01_2026-08-15`, ambas fechas inclusive) |
+
+**No inventes ni aproximes un rango específico con `semana`/`mes`** -- esos son ventanas rodantes que terminan hoy, casi nunca coinciden con las fechas exactas que pide el usuario. Si piden un rango de fechas, usá siempre `reports_marketing_rango_...` con las fechas exactas.
 
 1. Generá un id único.
 2. Escribí `/workspace/project/ops/requests/<id>.json` con `{"cmd": "<comando>"}`.
-3. Esperá hasta ~5s a que aparezca `/workspace/project/ops/results/<id>.json`.
+3. Esperá a que aparezca `/workspace/project/ops/results/<id>.json` --
+   normalmente ~5s, pero `reports_marketing_hoy` puede tardar hasta ~20s: ese
+   comando dispara un sync en vivo contra Meta Ads antes de responder (no lee
+   solo el último sync de 30 min), así que dale ese margen antes de asumir
+   que no llegó. `reports_marketing_rango_...` hace lo mismo (y tarda igual
+   de hasta ~20s) solo si `hasta` es hoy o una fecha futura -- un rango
+   completamente en el pasado responde rápido, como `ayer`.
 4. El campo `stdout` trae:
 
 ```json
@@ -58,9 +68,18 @@ verificado.** No lo presentes como un hecho confirmado.
   "campañas": [
     { "nombre": "Ventas retargeting Da Vincheese...", "gasto": 285000, "gastoFmt": "$285.000", "compras": 8, "roas": "3.1" }
   ],
+  "datoEnVivo": true,
   "advertencia": "comprasAtribuidas/valorAtribuido/roas son la atribución propia de Meta..."
 }
 ```
+
+`datoEnVivo` solo viene en `hoy` (`null` en los demás períodos). Si es
+`true`, el gasto es del momento. Si es `false`, el sync en vivo no llegó a
+tiempo y lo que ves es lo último sincronizado -- agregá "(dato de hace unos
+minutos, no en vivo)" en la respuesta en ese caso. De cualquier forma,
+`comprasAtribuidas`/`valorAtribuido`/`roas` siguen sujetos a la ventana de
+atribución propia de Meta (24-72h) -- el sync en vivo pone al día el gasto,
+no elimina ese lag, seguí aclarándolo igual que siempre.
 
 `roas` y el `roas` por campaña pueden venir `null` si no hubo gasto en el
 período — decilo así, no muestres 0.00.

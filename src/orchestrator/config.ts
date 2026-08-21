@@ -89,6 +89,14 @@ const webhookEnv = readEnvFile(['WEBHOOK_PORT', 'WEBHOOK_SECRET']);
 export const WEBHOOK_PORT = parseInt(process.env.WEBHOOK_PORT || webhookEnv.WEBHOOK_PORT || '3100', 10);
 export const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || webhookEnv.WEBHOOK_SECRET || '';
 
+// IA bridge server configuration (puente síncrono para davincheese-os, ver
+// src/ia-bridge/server.ts) -- puerto/secreto separados del webhook normal
+// porque el contrato es distinto (síncrono, devuelve la respuesta en el
+// mismo request, no enruta por un canal de WhatsApp).
+const iaBridgeEnv = readEnvFile(['IA_BRIDGE_PORT', 'IA_BRIDGE_SECRET']);
+export const IA_BRIDGE_PORT = parseInt(process.env.IA_BRIDGE_PORT || iaBridgeEnv.IA_BRIDGE_PORT || '3101', 10);
+export const IA_BRIDGE_SECRET = process.env.IA_BRIDGE_SECRET || iaBridgeEnv.IA_BRIDGE_SECRET || '';
+
 // Runtime selection: 'container' (default, Apple Container / Docker) or 'sandbox' (srt)
 export const DEFAULT_RUNTIME: 'container' | 'sandbox' =
   (process.env.RUNTIME || envConfig.RUNTIME || 'container') === 'sandbox'

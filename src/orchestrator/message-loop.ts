@@ -12,6 +12,8 @@ import {
   TRIGGER_PATTERN,
   WEBHOOK_PORT,
   WEBHOOK_SECRET,
+  IA_BRIDGE_PORT,
+  IA_BRIDGE_SECRET,
 } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
 import {
@@ -76,6 +78,7 @@ import { Channel, MessageRouter, NewMessage, RegisteredGroup } from './types.js'
 import { logger } from './logger.js';
 import { logAgentRun } from '../cost-tracking/index.js';
 import { startWebhookServer } from '../webhook/server.js';
+import { startIaBridgeServer } from '../ia-bridge/server.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -806,8 +809,20 @@ export async function main(): Promise<void> {
       },
     });
   }
+  // Puente síncrono para davincheese-os (bot de pedidos de Da Vincheese) --
+  // ver src/ia-bridge/server.ts.
+  if (IA_BRIDGE_SECRET) {
+    startIaBridgeServer(IA_BRIDGE_PORT, IA_BRIDGE_SECRET);
+  }
 
   queue.setProcessMessagesFn((chatJid) => processGroupMessages(chatJid, router));
+  queue.setOnMaxRetriesExceeded((chatJid) => {
+    router
+      .send(chatJid, '⚠️ No pude procesar tu mensaje -- hubo un problema técnico repetido después de varios intentos. Probá escribir de nuevo en unos minutos.')
+      .catch((err) => {
+        logger.error({ chatJid, err }, 'Failed to send max-retries-exceeded notice');
+      });
+  });
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');

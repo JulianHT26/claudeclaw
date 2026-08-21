@@ -27,7 +27,11 @@ default silencioso.
 1. Generá un id único.
 2. Escribí `/workspace/project/ops/requests/<id>.json` con
    `{"cmd": "<uno de los cuatro comandos de arriba>"}`.
-3. Esperá hasta ~5s a que aparezca `/workspace/project/ops/results/<id>.json`.
+3. Esperá a que aparezca `/workspace/project/ops/results/<id>.json` --
+   normalmente ~5s, pero `reports_ventas_hoy` puede tardar hasta ~20s: ese
+   comando dispara un sync en vivo contra Fudo antes de responder (no lee
+   solo el último sync de 30 min), así que dale ese margen antes de asumir
+   que no llegó.
 4. El campo `stdout` trae un JSON con esta forma:
 
 ```json
@@ -38,9 +42,16 @@ default silencioso.
   "productoTop": { "nombre": "Mona Lisa para 2 personas", "unidades": 12, "ingresos": 576000, "participacionPct": "20.3" },
   "productoConCaida": { "nombre": "Classic Burger", "vsPromedio": "-18.0%" },
   "comparadoCon": "últimos 4 miércoles",
-  "rango": { "desde": "...", "hasta": "..." }
+  "rango": { "desde": "...", "hasta": "..." },
+  "datoEnVivo": true
 }
 ```
+
+`datoEnVivo` solo viene en `hoy` (`null` en los demás períodos). Si es
+`true`, el sync en vivo terminó a tiempo y el número es del momento. Si es
+`false`, el sync en vivo no llegó a tiempo (poco frecuente) y lo que ves es
+lo último sincronizado -- agregá "(dato de hace unos minutos, no en vivo)"
+en la respuesta en ese caso.
 
 `comparadoCon` ya trae el texto correcto para el período pedido (día de semana
 para hoy/ayer, "últimas 4 semanas" o "últimos 3 períodos de 30 días" para

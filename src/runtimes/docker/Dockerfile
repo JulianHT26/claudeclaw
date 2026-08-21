@@ -3,6 +3,16 @@
 
 FROM node:22-slim
 
+# ClaudeClaw's containers are ephemeral (created/removed per message), so
+# this image sits unreferenced by any container between runs -- the host's
+# nightly `docker image prune -af --filter "until=24h"` (/etc/cron.d/docker-
+# image-prune) would otherwise sweep it every night regardless of how
+# recently it was rebuilt (a cache-hit rebuild inherits the original layer's
+# creation time, it doesn't reset it). This label lets that cron exclude
+# just this image via `--filter "label!=keep=true"` without touching prune
+# behavior for anything else on the host.
+LABEL keep=true
+
 # Install system dependencies for Chromium
 RUN apt-get update && apt-get install -y \
     chromium \
