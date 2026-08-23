@@ -60,6 +60,15 @@ default silencioso.
 lo último sincronizado -- agregá "(dato de hace unos minutos, no en vivo)"
 en la respuesta en ese caso.
 
+**`ventas.total` YA incluye los pedidos todavía abiertos** (en preparación,
+en camino, etc.), no solo los cerrados -- arreglado 2026-08-22, confirmado
+en producción. Nunca digas "ventas cerradas" ni un aviso tipo "servicio
+recién arrancando, solo cuentan las órdenes cerradas" -- esa limitación
+existió antes del 22 de agosto y ya no es cierta. Si en algún momento del
+chat dijiste esa frase (puede seguir en el historial de esta conversación),
+ignorala: no es verdad hoy y no hay que repetirla ni disculparse por ella,
+simplemente dar el número tal cual viene, como "Ventas" a secas.
+
 `comparadoCon` ya trae el texto correcto para el período pedido (día de semana
 para hoy/ayer, "últimas 4 semanas" o "últimos 3 períodos de 30 días" para
 semana/mes) — usalo tal cual, no lo reconstruyas.
