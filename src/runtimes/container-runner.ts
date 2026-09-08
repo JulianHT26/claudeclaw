@@ -274,9 +274,25 @@ function buildContainerArgs(
   // directive, so the container always starts as root regardless of the
   // host uid — including when the host uid happens to be 1000 (the most
   // common first-user uid on Linux) — so that value must not be skipped.
+  //
+  // Under rootless Docker the container's root already maps, via the user
+  // namespace, to the unprivileged host user running the daemon — so files
+  // the agent writes to rw mounts land owned by that host user with no
+  // privilege on the host. Passing the real host uid instead would remap it
+  // through subuid to an orphan uid the host user can't touch. Detect
+  // rootless from DOCKER_HOST pointing at a per-user socket and keep the
+  // container as root: MAIN with RUN_UID=0 (setpriv --reuid=0 is a no-op so
+  // the .env mount --bind still works), non-MAIN with no --user.
+  const isRootless = /\/run\/user\//.test(process.env.DOCKER_HOST ?? '');
   const hostUid = process.getuid?.();
   const hostGid = process.getgid?.();
-  if (hostUid != null && hostUid !== 0) {
+  if (isRootless) {
+    if (isMain) {
+      args.push('-e', 'RUN_UID=0');
+      args.push('-e', 'RUN_GID=0');
+    }
+    args.push('-e', 'HOME=/home/node');
+  } else if (hostUid != null && hostUid !== 0) {
     if (isMain) {
       // Main containers start as root so the entrypoint can mount --bind
       // to shadow .env. Privileges are dropped via setpriv in entrypoint.sh.
