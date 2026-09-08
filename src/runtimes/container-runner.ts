@@ -291,6 +291,11 @@ function buildContainerArgs(
       args.push('-e', 'RUN_UID=0');
       args.push('-e', 'RUN_GID=0');
     }
+    // The container runs as container-root under rootless. Claude Code refuses
+    // --dangerously-skip-permissions (which permissionMode 'bypassPermissions'
+    // passes) when euid is 0, unless IS_SANDBOX marks the environment as
+    // isolated — which the ephemeral agent container is.
+    args.push('-e', 'IS_SANDBOX=1');
     args.push('-e', 'HOME=/home/node');
   } else if (hostUid != null && hostUid !== 0) {
     if (isMain) {
