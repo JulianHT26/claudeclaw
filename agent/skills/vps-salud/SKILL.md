@@ -26,8 +26,13 @@ El puente está montado en `/workspace/extra/vps-bridge`.
 **Lectura:** `ps` · `stats` · `images` · `volumes` · `networks` · `compose-ls`
 · `logs` args `["<contenedor>","<n≤500>"]` · `inspect` args `["<contenedor>"]`
 · `health` args `["<contenedor>"]` · `df` · `mem` · `uptime` · `top`
-· `list-units` · `list-timers` · `systemctl-status` args `["<unidad>"]`
+· `list-units` · `list-timers` · `alerts` · `systemctl-status` args `["<unidad>"]`
 · `journal` args `["<unidad>","<n>"]`
+
+`alerts` — lee `/srv/_ops/alerts/`, donde los timers de backup dejan rastro si
+fallan. `exit` 0 y `"sin alertas"` = todo bien. `exit` 1 = hay un backup o un
+restore-test fallido; mostrá el `unit` y el `ts` y sugerí revisar
+`journal ["dvc-pg-backup",...]` o `journal ["dvc-restore-test",...]`.
 
 **Acción (⚠️ SOLO si el usuario lo pide explícito en el mensaje):**
 `restart-container` args `["<nombre>"]` — denylist: traefik, postgres, redis, ES,
@@ -36,11 +41,12 @@ systemd, bridge.
 
 ## "¿cómo está el VPS?"
 
-Pedí en orden: `ps`, `df`, `mem`, `list-units`. De `ps` mirá:
-`dvc_traefik`, `dvc_socket_proxy`, `dvc_api`, `dvc_admin`, `dvc_worker`,
-`dvc_fudo_bot`, `dvc_postgres`, `dvc_redis`, `dvc_marketing` (+ sus
-`dvc_marketing_*`), `dvc_uptime`, `dvc_dozzle` → `Up` vs
-`Restarting`/`Exited`/`unhealthy`/ausente.
+Pedí en orden: `ps`, `df`, `mem`, `list-units`, `alerts`. De `ps` mirá:
+`dvc_traefik`, `dvc_socket_proxy`, `dvc_socket_proxy_logs`, `dvc_api`,
+`dvc_admin`, `dvc_worker`, `dvc_fudo_bot`, `dvc_postgres`, `dvc_redis`,
+`dvc_marketing` (+ sus `dvc_marketing_*`), `dvc_uptime`, `dvc_dozzle` → `Up` vs
+`Restarting`/`Exited`/`unhealthy`/ausente. `alerts` != 0 → hay un backup fallido:
+ponelo en "Detectado".
 
 ```
 🟢 VPS — OPERATIVO
@@ -51,6 +57,7 @@ FUDO BOT               🟢
 DATOS (pg/redis)       🟢
 MARKETING (postiz)     🟢
 MONITOREO              🟢
+BACKUPS               🟢  (alerts sin novedad)
 DISCO                 🟢  20%
 MEMORIA               🟢  38%
 
