@@ -62,6 +62,9 @@ el reporte real (un mensaje por proveedor, reaccionable, dispara el pago).
   de guardar).
 - Reaccionar con cualquier otro emoji (✅/❌ incluidos), o no reaccionar, **no hace nada** -- el
   proveedor queda pendiente sin vencimiento, se puede resolver en cualquier momento futuro.
+- **El aviso de éxito/error de cada pago lo manda el puente directo, como mensaje propio** (sin el
+  prefijo `[Davincho] 🧊` -- se nota porque no lleva ese prefijo). Vos (Davincho) NO te enterás
+  cuando eso pasa ni tenés forma de confirmarlo desde el chat.
 
 ## No hacer
 
@@ -74,3 +77,8 @@ el reporte real (un mensaje por proveedor, reaccionable, dispara el pago).
   quietos de un pedido anterior. Cada pedido nuevo corre el paso 1 de nuevo, sin excepción.
 - No confundas el paso 1 con el pago en sí -- el resumen no publica nada ni mueve dinero, el pago
   lo dispara la reacción del usuario después del paso 2, nunca antes.
+- **Nunca confirmes que un pago "quedó registrado" o algo similar si el usuario te dice "ya
+  reaccioné" o parecido.** No tenés ninguna forma de saber si funcionó -- el aviso real lo manda
+  el puente por su cuenta (ver arriba). Si el usuario te pregunta cómo va, decile eso: que el
+  aviso llega directo del puente, no de vos, y que revise si le llegó un mensaje de confirmación
+  separado.

@@ -45,7 +45,12 @@ export class WhatsAppChannel implements Channel {
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
   private groupSyncTimerStarted = false;
-  private reactionHandler: ((evt: ReactionEvent) => void) | null = null;
+  // Lista, no un único slot: hoy hay 2 consumidores (comprobantes-bridge,
+  // proveedores-bridge) -- un solo slot hacía que el segundo en registrarse
+  // pisara en silencio al primero (bug real encontrado 2026-09-09: las
+  // reacciones de proveedores-bridge tampoco andaban, y de paso comprobantes-bridge
+  // había quedado roto sin que nadie lo notara).
+  private reactionHandlers: ((evt: ReactionEvent) => void)[] = [];
 
   private opts: WhatsAppChannelOpts;
 
@@ -260,28 +265,38 @@ export class WhatsAppChannel implements Channel {
     // reaccionó) -- al revés de lo que el nombre sugiere a primera vista.
     this.sock.ev.on('messages.reaction', (reactions) => {
       for (const item of reactions) {
-        try {
-          if (!this.reactionHandler) continue;
-          const emoji = item.reaction?.text ?? '';
-          const chatJid = item.key?.remoteJid;
-          const targetMessageId = item.key?.id;
-          if (!chatJid || !targetMessageId || !emoji) continue; // '' = reacción removida, se ignora
+        void (async () => {
+          try {
+            if (this.reactionHandlers.length === 0) return;
+            const emoji = item.reaction?.text ?? '';
+            const rawChatJid = item.key?.remoteJid;
+            const targetMessageId = item.key?.id;
+            if (!rawChatJid || !targetMessageId || !emoji) return; // '' = reacción removida, se ignora
 
-          const reactorJid = item.reaction?.key?.participant || item.reaction?.key?.remoteJid || '';
-          const reactorName = reactorJid.split('@')[0];
+            // Mismo criterio que messages.upsert arriba: en DMs (no grupos)
+            // el remoteJid de una reacción puede venir en formato @lid --
+            // sin esta traducción nunca calza contra un chatJid configurado
+            // en formato @s.whatsapp.net (bug real 2026-09-09: por esto las
+            // reacciones de proveedores-bridge no disparaban nada).
+            const chatJid = await this.translateJid(rawChatJid);
 
-          this.reactionHandler({ chatJid, targetMessageId, emoji, reactorJid, reactorName });
-        } catch (err) {
-          logger.error({ err }, 'Error processing incoming reaction');
-        }
+            const reactorJid = item.reaction?.key?.participant || item.reaction?.key?.remoteJid || '';
+            const reactorName = reactorJid.split('@')[0];
+
+            const evt: ReactionEvent = { chatJid, targetMessageId, emoji, reactorJid, reactorName };
+            for (const handler of this.reactionHandlers) handler(evt);
+          } catch (err) {
+            logger.error({ err }, 'Error processing incoming reaction');
+          }
+        })();
       }
     });
   }
 
-  /** Ver ReactionEvent -- solo un handler a la vez (un único consumidor,
-   * comprobantes-bridge/server.ts, no hace falta una lista). */
+  /** Ver ReactionEvent -- cada bridge que se suscribe se agrega a la lista,
+   * no reemplaza a los demás (ver comentario en el campo reactionHandlers). */
   onReaction(handler: (evt: ReactionEvent) => void): void {
-    this.reactionHandler = handler;
+    this.reactionHandlers.push(handler);
   }
 
   // WhatsApp (via Baileys, unofficial) can silently drop very long single
