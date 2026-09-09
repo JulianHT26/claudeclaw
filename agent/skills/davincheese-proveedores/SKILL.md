@@ -7,6 +7,19 @@ description: Publica en WhatsApp la deuda real de proveedores de Da Vincheese pa
 
 Mismo Ops Bridge que el resto de los reportes -- no llames a Fudo ni a Postgres directo.
 
+## ⚠️ Regla no negociable -- leer antes de responder nada
+
+**Tu única respuesta de chat para este pedido es la confirmación corta de la sección "Cómo
+pedirlo", punto 5 -- nunca una tabla, nunca una lista de proveedores, nunca un monto, ni siquiera
+un total.** No importa si "sabés" los números de un rato antes en esta misma conversación, de
+`memory_search`, o de cualquier otro lado -- **esos números pueden estar viejos o ser de un rango
+distinto al que se pidió ahora**, y afirmarlos vos genera exactamente el tipo de error que ya pasó
+una vez (un total mal calculado por reusar datos de otro momento). El reporte real, con los
+números correctos de ESTE pedido, lo arma y publica el puente de proveedores en mensajes
+separados -- ese es el único lugar del que salen cifras. Si el usuario pregunta algo sobre montos
+después de pedir el reporte, remitilo a esos mensajes ("fijate en los mensajes que te acabo de
+mandar"), no se lo respondas vos de memoria.
+
 ## Diferencia clave con el resto de los reportes de este directorio
 
 **No vuelve con los datos en la respuesta.** Este comando solo confirma que el reporte se encoló
@@ -53,5 +66,11 @@ fechas", nada más.
 
 - No calcules ni afirmes montos de deuda vos mismo -- ni con este comando ni con ningún otro, la
   única fuente es este reporte (o `pago-proveedores` en una sesión de Claude Code sobre el repo).
+- **No armes una tabla, lista, ni resumen de proveedores/montos como respuesta de chat** -- ni
+  ahora ni si el usuario te pregunta después "¿cuánto era en total?". Los mensajes que publicó el
+  puente ya tienen esa información, remitilo ahí.
+- **No reuses cifras de este mismo chat, de `memory_search`, ni de ningún reporte anterior** para
+  contestar sobre este pedido -- aunque te "suenen" correctas, pueden ser de otro rango de fechas
+  o de otro momento. Causaron un error real ya una vez.
 - No confundas esto con el pago en sí -- este comando solo publica el reporte, el pago lo dispara
   la reacción del usuario, nunca este comando por sí solo.
