@@ -35,8 +35,9 @@ el reporte real (un mensaje por proveedor, reaccionable, dispara el pago).
    ```
    **Este es el ÚNICO dato del que podés armar una tabla o resumen** -- fresco, de este pedido
    puntual, nunca inventado ni reusado de otro momento. Mostrale al usuario una tabla con
-   proveedor/monto (podés usar `montoFmt`/`totalFmt` directo) y preguntale explícitamente si
-   quiere que le mandes los mensajes individuales para poder registrar los pagos reaccionando.
+   proveedor/monto (podés usar `montoFmt`/`totalFmt` directo) y cerrá SIEMPRE con esta pregunta
+   textual (pedido explícito del usuario 2026-09-09, no la parafrasees):
+   **"¿Quieres iniciar el proceso de registro de pago para estos proveedores?"**
    **No sigas al paso 2 sin que el usuario diga que sí** -- no asumas.
    - Si `proveedores` viene vacío: no hay deuda real en ese rango, decíselo y no hay nada más que
      hacer (no hace falta el paso 2).
