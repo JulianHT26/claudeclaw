@@ -240,6 +240,13 @@ async function ejecutarPagoCompleto(
     }
 
     lineas.push(`✅ Gasto ${gasto.fechaDdMmAaaa} (${formatearCop(gasto.amount)}) pagado -- verificado contra Fudo.`);
+
+    // Pausa corta antes del próximo gasto -- hallazgo real 2026-09-09: un
+    // gasto recién pagado a veces no aparecía todavía en el multiselect de
+    // Fudo para el siguiente intento inmediato de la misma fecha ("encontré
+    // 0" en vez del esperado 1), probablemente el frontend/backend de Fudo
+    // no había terminado de propagar el cambio anterior.
+    await new Promise((r) => setTimeout(r, 2000));
   }
   return { okTodos: true, resumen: lineas.join('\n') };
 }
