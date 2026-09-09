@@ -37,11 +37,78 @@ import {
   FUDO_WEB_ENV_FILE,
   PAGAR_PROVEEDOR_SCRIPT,
   PAGAR_PROVEEDOR_PYTHON,
+  FUDO_API_KEY,
+  FUDO_API_SECRET,
 } from '../orchestrator/config.js';
 
 const execFileAsync = promisify(execFile);
 
 const PAGO_SCRIPT_TIMEOUT_MS = 90_000;
+
+// --- Verificación real contra la API de Fudo (SOLO LECTURA) ---
+//
+// Hallazgo real 2026-09-09: pagar_proveedor.py, tras hacer clic en
+// "Guardar", solo verifica que el panel se haya cerrado visualmente ("Panel
+// cerrado (guardado probable)" -- el propio "probable" ya avisaba que era
+// un heurístico débil). Eso dio 2 falsos positivos reales en producción:
+// el script reportó éxito (exit 0) para 2 gastos que en Fudo seguían
+// UNPAID. Antes de decirle al usuario "✅ pagado", este puente confirma el
+// status real del gasto contra la API -- nunca escribe nada acá.
+
+let fudoTokenCache: { token: string; exp: number } | null = null;
+
+async function fudoAuthToken(): Promise<string | null> {
+  if (!FUDO_API_KEY || !FUDO_API_SECRET) return null;
+  const ahora = Math.floor(Date.now() / 1000);
+  if (fudoTokenCache && fudoTokenCache.exp - 60 > ahora) return fudoTokenCache.token;
+  try {
+    const res = await fetch('https://auth.fu.do/api', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey: FUDO_API_KEY, apiSecret: FUDO_API_SECRET }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { token: string; exp: number };
+    fudoTokenCache = data;
+    return data.token;
+  } catch (err) {
+    logger.error({ err }, 'proveedores-bridge: fallo autenticando contra la API de Fudo');
+    return null;
+  }
+}
+
+type EstadoVerificacion = 'pagado' | 'no_pagado' | 'no_verificable';
+
+async function consultarStatusGasto(fudoId: string): Promise<EstadoVerificacion> {
+  const token = await fudoAuthToken();
+  if (!token) return 'no_verificable';
+  try {
+    const res = await fetch(`https://api.fu.do/v1alpha1/expenses/${fudoId}?fields[expense]=status`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return 'no_verificable';
+    const data = (await res.json()) as { data?: { attributes?: { status?: string } } };
+    return data.data?.attributes?.status === 'PAID' ? 'pagado' : 'no_pagado';
+  } catch (err) {
+    logger.error({ err, fudoId }, 'proveedores-bridge: fallo verificando el gasto contra la API de Fudo');
+    return 'no_verificable';
+  }
+}
+
+/** Confirma contra la API real de Fudo (nunca contra lo que dijo el script)
+ * que un gasto puntual quedó en status PAID. Un reintento con espera corta
+ * si el primer chequeo da "no_pagado" -- por si la API todavía no propagó
+ * el cambio que acaba de hacer el navegador (evita un falso NEGATIVO por
+ * timing). `no_verificable` -- FUDO_API_KEY/SECRET sin configurar, o la API
+ * no respondió -- se trata como un fallo a reportar con claridad, NUNCA
+ * como éxito silencioso (fail-closed a propósito, es la lección del
+ * hallazgo de arriba). */
+async function verificarGastoPagado(fudoId: string): Promise<EstadoVerificacion> {
+  const primero = await consultarStatusGasto(fudoId);
+  if (primero !== 'no_pagado') return primero;
+  await new Promise((r) => setTimeout(r, 3000));
+  return consultarStatusGasto(fudoId);
+}
 
 function verifySignature(secret: string, payload: string, signature: string): boolean {
   const expected = crypto.createHmac('sha256', secret).update(payload).digest('hex');
@@ -154,7 +221,25 @@ async function ejecutarPagoCompleto(
       return { okTodos: false, resumen: lineas.join('\n\n') };
     }
 
-    lineas.push(`✅ Gasto ${gasto.fechaDdMmAaaa} (${formatearCop(gasto.amount)}) pagado.`);
+    // El script pensó que guardó (exit 0), pero eso solo mide si el panel
+    // se cerró visualmente -- confirmar de verdad contra la API antes de
+    // decir "pagado" (ver hallazgo 2026-09-09 arriba de este archivo: dio 2
+    // falsos positivos reales sin esta verificación).
+    const verificado = await verificarGastoPagado(gasto.fudoId);
+    if (verificado === 'no_pagado') {
+      lineas.push(
+        `❌ Gasto ${gasto.fechaDdMmAaaa} (${formatearCop(gasto.amount)}): el script dijo que guardó, pero Fudo lo sigue mostrando SIN pagar -- no se cuenta como pagado, revisar a mano antes de reintentar.`,
+      );
+      return { okTodos: false, resumen: lineas.join('\n\n') };
+    }
+    if (verificado === 'no_verificable') {
+      lineas.push(
+        `⚠️ Gasto ${gasto.fechaDdMmAaaa} (${formatearCop(gasto.amount)}): el script dijo que guardó, pero no se pudo verificar contra Fudo (FUDO_API_KEY/SECRET o la API no respondieron) -- confirmá a mano antes de asumir que quedó pagado.`,
+      );
+      return { okTodos: false, resumen: lineas.join('\n\n') };
+    }
+
+    lineas.push(`✅ Gasto ${gasto.fechaDdMmAaaa} (${formatearCop(gasto.amount)}) pagado -- verificado contra Fudo.`);
   }
   return { okTodos: true, resumen: lineas.join('\n') };
 }

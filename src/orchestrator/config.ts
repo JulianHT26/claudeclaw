@@ -137,6 +137,8 @@ const proveedoresBridgeEnv = readEnvFile([
   'FUDO_WEB_ENV_FILE',
   'PAGAR_PROVEEDOR_SCRIPT',
   'PAGAR_PROVEEDOR_PYTHON',
+  'FUDO_API_KEY',
+  'FUDO_API_SECRET',
 ]);
 export const PROVEEDORES_BRIDGE_PORT = parseInt(
   process.env.PROVEEDORES_BRIDGE_PORT || proveedoresBridgeEnv.PROVEEDORES_BRIDGE_PORT || '3103',
@@ -154,6 +156,13 @@ export const PAGAR_PROVEEDOR_SCRIPT =
   process.env.PAGAR_PROVEEDOR_SCRIPT || proveedoresBridgeEnv.PAGAR_PROVEEDOR_SCRIPT || '';
 export const PAGAR_PROVEEDOR_PYTHON =
   process.env.PAGAR_PROVEEDOR_PYTHON || proveedoresBridgeEnv.PAGAR_PROVEEDOR_PYTHON || '';
+// API oficial de Fudo, SOLO LECTURA acá -- para verificar de verdad que un
+// pago se guardó (GET /expenses/:id) antes de reportarle éxito al usuario.
+// Encontrado en vivo 2026-09-09: pagar_proveedor.py solo verificaba que el
+// panel visualmente se cerró tras "Guardar" -- un heurístico débil (su
+// propio print decía "probable") que dio 2 falsos positivos reales.
+export const FUDO_API_KEY = process.env.FUDO_API_KEY || proveedoresBridgeEnv.FUDO_API_KEY || '';
+export const FUDO_API_SECRET = process.env.FUDO_API_SECRET || proveedoresBridgeEnv.FUDO_API_SECRET || '';
 
 // Runtime selection: 'container' (default, Apple Container / Docker) or 'sandbox' (srt)
 export const DEFAULT_RUNTIME: 'container' | 'sandbox' =
