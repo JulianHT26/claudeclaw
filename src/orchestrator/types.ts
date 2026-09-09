@@ -110,6 +110,12 @@ export interface Channel {
   // Optional: register a callback for incoming reactions to messages this
   // channel sent. Only channels that support reactions implement this.
   onReaction?(handler: (evt: ReactionEvent) => void): void;
+  // Optional: send a short text message and return its id (needed to
+  // correlate a later reaction to it) -- unlike sendMessage, no chunking,
+  // no queueing on disconnect (fails outright, same tradeoff as sendImage).
+  // Used by bridges that need reaction tracking on plain text (ver
+  // proveedores-bridge/server.ts).
+  sendMessageForTracking?(jid: string, text: string): Promise<string | null>;
 }
 
 // --- Message routing ---

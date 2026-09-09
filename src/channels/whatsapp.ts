@@ -346,6 +346,28 @@ export class WhatsAppChannel implements Channel {
     }
   }
 
+  /** Igual que sendImage pero para texto plano corto (sin adjunto) -- mismo
+   * motivo: bridges que necesitan el id para trackear una reacción posterior
+   * (ver proveedores-bridge/server.ts) no pueden usar sendMessage porque esa
+   * no devuelve nada. Sin chunking (se asume texto corto, un mensaje =
+   * una fila de tracking) ni encolado en desconexión -- mismo tradeoff que
+   * sendImage: el caller trata null como "no se pudo enviar", no reintenta acá. */
+  async sendMessageForTracking(jid: string, text: string): Promise<string | null> {
+    if (!this.connected) {
+      logger.warn({ jid }, 'sendMessageForTracking: WhatsApp desconectado, no se envía');
+      return null;
+    }
+    try {
+      const sent = await this.sock.sendMessage(jid, { text, linkPreview: null });
+      const id = sent?.key?.id ?? null;
+      logger.info({ jid, id }, 'Mensaje (trackeable) enviado');
+      return id;
+    } catch (err) {
+      logger.error({ jid, err }, 'Fallo enviando mensaje trackeable');
+      return null;
+    }
+  }
+
   /** Envía una imagen con caption -- a diferencia de sendMessage, no encola
    * si está desconectado ni reintenta: el caller (comprobantes-bridge) tiene
    * que poder tratar el fallo como "no se pudo publicar, escalar directo"

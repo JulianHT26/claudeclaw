@@ -16,6 +16,8 @@ import {
   IA_BRIDGE_SECRET,
   COMPROBANTES_BRIDGE_PORT,
   COMPROBANTES_BRIDGE_SECRET,
+  PROVEEDORES_BRIDGE_PORT,
+  PROVEEDORES_BRIDGE_SECRET,
 } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
 import {
@@ -82,6 +84,7 @@ import { logAgentRun } from '../cost-tracking/index.js';
 import { startWebhookServer } from '../webhook/server.js';
 import { startIaBridgeServer } from '../ia-bridge/server.js';
 import { startComprobantesBridgeServer } from '../comprobantes-bridge/server.js';
+import { startProveedoresBridgeServer } from '../proveedores-bridge/server.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -826,6 +829,17 @@ export async function main(): Promise<void> {
       startComprobantesBridgeServer(COMPROBANTES_BRIDGE_PORT, COMPROBANTES_BRIDGE_SECRET, whatsapp);
     } else {
       logger.warn('COMPROBANTES_BRIDGE_SECRET configurado pero el canal de WhatsApp no está activo -- omitiendo');
+    }
+  }
+  // Reporte semanal de proveedores pendientes + pago por reacción -- ver
+  // src/proveedores-bridge/server.ts. Mismo requisito que comprobantes-bridge:
+  // necesita el canal de WhatsApp ya conectado.
+  if (PROVEEDORES_BRIDGE_SECRET) {
+    const whatsapp = channels.find((ch) => ch.name === 'whatsapp');
+    if (whatsapp) {
+      startProveedoresBridgeServer(PROVEEDORES_BRIDGE_PORT, PROVEEDORES_BRIDGE_SECRET, whatsapp);
+    } else {
+      logger.warn('PROVEEDORES_BRIDGE_SECRET configurado pero el canal de WhatsApp no está activo -- omitiendo');
     }
   }
 

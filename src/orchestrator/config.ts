@@ -125,6 +125,36 @@ export const DAVINCHEESE_COMPROBANTE_WEBHOOK_SECRET =
   comprobantesBridgeEnv.DAVINCHEESE_COMPROBANTE_WEBHOOK_SECRET ||
   '';
 
+// Puente de reporte semanal + pago de proveedores por reacción (ver
+// src/proveedores-bridge/server.ts) -- davincheese-os publica un mensaje
+// por proveedor/medio de pago en el chat de Julian, y este puente ejecuta
+// pagar_proveedor.py cuando reacciona ✅. Ver
+// decisions/2026-09-09-cron-pago-proveedores.md.
+const proveedoresBridgeEnv = readEnvFile([
+  'PROVEEDORES_BRIDGE_PORT',
+  'PROVEEDORES_BRIDGE_SECRET',
+  'PROVEEDORES_CHAT_JID',
+  'FUDO_WEB_ENV_FILE',
+  'PAGAR_PROVEEDOR_SCRIPT',
+  'PAGAR_PROVEEDOR_PYTHON',
+]);
+export const PROVEEDORES_BRIDGE_PORT = parseInt(
+  process.env.PROVEEDORES_BRIDGE_PORT || proveedoresBridgeEnv.PROVEEDORES_BRIDGE_PORT || '3103',
+  10,
+);
+export const PROVEEDORES_BRIDGE_SECRET =
+  process.env.PROVEEDORES_BRIDGE_SECRET || proveedoresBridgeEnv.PROVEEDORES_BRIDGE_SECRET || '';
+export const PROVEEDORES_CHAT_JID =
+  process.env.PROVEEDORES_CHAT_JID || proveedoresBridgeEnv.PROVEEDORES_CHAT_JID || '';
+// Credenciales mínimas de Fudo Web (ver pagar_proveedor.py, load_env()) --
+// nunca el .env completo de davincheese-os, dv no tiene acceso a ese.
+export const FUDO_WEB_ENV_FILE =
+  process.env.FUDO_WEB_ENV_FILE || proveedoresBridgeEnv.FUDO_WEB_ENV_FILE || '';
+export const PAGAR_PROVEEDOR_SCRIPT =
+  process.env.PAGAR_PROVEEDOR_SCRIPT || proveedoresBridgeEnv.PAGAR_PROVEEDOR_SCRIPT || '';
+export const PAGAR_PROVEEDOR_PYTHON =
+  process.env.PAGAR_PROVEEDOR_PYTHON || proveedoresBridgeEnv.PAGAR_PROVEEDOR_PYTHON || '';
+
 // Runtime selection: 'container' (default, Apple Container / Docker) or 'sandbox' (srt)
 export const DEFAULT_RUNTIME: 'container' | 'sandbox' =
   (process.env.RUNTIME || envConfig.RUNTIME || 'container') === 'sandbox'

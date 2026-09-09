@@ -96,6 +96,25 @@ function createSchema(
       created_at TEXT NOT NULL
     );
 
+    -- Correlaciona los 3 mensajes (uno por medio de pago) que se mandan por
+    -- proveedor en el reporte semanal (ver src/proveedores-bridge/server.ts)
+    -- con el pago exacto a ejecutar si el usuario reacciona ✅ a alguno de
+    -- los 3. group_key agrupa los 3 -- reaccionar a cualquiera resuelve los
+    -- otros dos también (nunca se paga dos veces al mismo proveedor por la
+    -- misma semana).
+    CREATE TABLE IF NOT EXISTS proveedor_pendiente_tracking (
+      whatsapp_message_id TEXT PRIMARY KEY,
+      group_key TEXT NOT NULL,
+      provider_id TEXT NOT NULL,
+      provider_name TEXT NOT NULL,
+      medio_pago TEXT NOT NULL,
+      monto_total INTEGER NOT NULL,
+      gastos_json TEXT NOT NULL,
+      sin_arqueo INTEGER NOT NULL,
+      resolved INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+
   `);
 
   // Run plugin DB schema (plugins register on import before DB init)
@@ -589,6 +608,83 @@ export function resolveComprobanteTracking(whatsappMessageId: string): string | 
     .prepare('UPDATE comprobante_tracking SET resolved = 1 WHERE whatsapp_message_id = ? AND resolved = 0')
     .run(whatsappMessageId);
   return result.changes === 1 ? row.order_id : null;
+}
+
+// --- Proveedor pendiente tracking (ver src/proveedores-bridge/server.ts) ---
+
+export interface ProveedorPendienteTracking {
+  whatsappMessageId: string;
+  groupKey: string;
+  providerId: string;
+  providerName: string;
+  medioPago: string;
+  montoTotal: number;
+  gastos: { fudoId: string; fechaDdMmAaaa: string; amount: number }[];
+  sinArqueo: boolean;
+}
+
+export function trackProveedorPendienteMessage(data: ProveedorPendienteTracking): void {
+  db.prepare(
+    `INSERT OR REPLACE INTO proveedor_pendiente_tracking
+     (whatsapp_message_id, group_key, provider_id, provider_name, medio_pago, monto_total, gastos_json, sin_arqueo, resolved, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+  ).run(
+    data.whatsappMessageId,
+    data.groupKey,
+    data.providerId,
+    data.providerName,
+    data.medioPago,
+    data.montoTotal,
+    JSON.stringify(data.gastos),
+    data.sinArqueo ? 1 : 0,
+    new Date().toISOString(),
+  );
+}
+
+/**
+ * Resuelve el mensaje reaccionado Y todo el grupo (los 3 medios de pago del
+ * mismo proveedor/semana) de una sola vez -- atómico vía transacción, para
+ * que dos reacciones casi simultáneas en mensajes distintos del mismo grupo
+ * nunca disparen dos pagos. Devuelve los datos del mensaje reaccionado SOLO
+ * si esta llamada fue la que resolvió el grupo (null si no había tracking,
+ * o si el grupo ya estaba resuelto por otra reacción anterior).
+ */
+export function resolveProveedorPendienteGroup(whatsappMessageId: string): ProveedorPendienteTracking | null {
+  const row = db
+    .prepare('SELECT * FROM proveedor_pendiente_tracking WHERE whatsapp_message_id = ?')
+    .get(whatsappMessageId) as
+    | {
+        whatsapp_message_id: string;
+        group_key: string;
+        provider_id: string;
+        provider_name: string;
+        medio_pago: string;
+        monto_total: number;
+        gastos_json: string;
+        sin_arqueo: number;
+        resolved: number;
+      }
+    | undefined;
+  if (!row) return null;
+
+  const resolverGrupo = db.transaction((groupKey: string) => {
+    return db
+      .prepare('UPDATE proveedor_pendiente_tracking SET resolved = 1 WHERE group_key = ? AND resolved = 0')
+      .run(groupKey);
+  });
+  const result = resolverGrupo(row.group_key);
+  if (result.changes === 0) return null; // ya lo había resuelto otra reacción
+
+  return {
+    whatsappMessageId: row.whatsapp_message_id,
+    groupKey: row.group_key,
+    providerId: row.provider_id,
+    providerName: row.provider_name,
+    medioPago: row.medio_pago,
+    montoTotal: row.monto_total,
+    gastos: JSON.parse(row.gastos_json),
+    sinArqueo: Boolean(row.sin_arqueo),
+  };
 }
 
 // --- Registered group accessors ---
