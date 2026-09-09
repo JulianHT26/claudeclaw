@@ -96,18 +96,18 @@ function createSchema(
       created_at TEXT NOT NULL
     );
 
-    -- Correlaciona los 3 mensajes (uno por medio de pago) que se mandan por
-    -- proveedor en el reporte semanal (ver src/proveedores-bridge/server.ts)
-    -- con el pago exacto a ejecutar si el usuario reacciona ✅ a alguno de
-    -- los 3. group_key agrupa los 3 -- reaccionar a cualquiera resuelve los
-    -- otros dos también (nunca se paga dos veces al mismo proveedor por la
-    -- misma semana).
+    -- Correlaciona el mensaje único que se manda por proveedor en el reporte
+    -- semanal (ver src/proveedores-bridge/server.ts) con los datos para
+    -- ejecutar el pago -- medios_json mapea emoji -> medio de pago exacto,
+    -- el puente resuelve cuál usar según con qué emoji reaccionó el
+    -- usuario. Un solo mensaje por proveedor (corregido 2026-09-09: la
+    -- primera versión mandaba 3 mensajes idénticos, uno por medio -- se
+    -- veía como el mismo gasto pegado 3 veces).
     CREATE TABLE IF NOT EXISTS proveedor_pendiente_tracking (
       whatsapp_message_id TEXT PRIMARY KEY,
-      group_key TEXT NOT NULL,
       provider_id TEXT NOT NULL,
       provider_name TEXT NOT NULL,
-      medio_pago TEXT NOT NULL,
+      medios_json TEXT NOT NULL,
       monto_total INTEGER NOT NULL,
       gastos_json TEXT NOT NULL,
       sin_arqueo INTEGER NOT NULL,
@@ -614,10 +614,9 @@ export function resolveComprobanteTracking(whatsappMessageId: string): string | 
 
 export interface ProveedorPendienteTracking {
   whatsappMessageId: string;
-  groupKey: string;
   providerId: string;
   providerName: string;
-  medioPago: string;
+  medios: Record<string, string>; // emoji -> medio de pago exacto
   montoTotal: number;
   gastos: { fudoId: string; fechaDdMmAaaa: string; amount: number }[];
   sinArqueo: boolean;
@@ -626,14 +625,13 @@ export interface ProveedorPendienteTracking {
 export function trackProveedorPendienteMessage(data: ProveedorPendienteTracking): void {
   db.prepare(
     `INSERT OR REPLACE INTO proveedor_pendiente_tracking
-     (whatsapp_message_id, group_key, provider_id, provider_name, medio_pago, monto_total, gastos_json, sin_arqueo, resolved, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+     (whatsapp_message_id, provider_id, provider_name, medios_json, monto_total, gastos_json, sin_arqueo, resolved, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`,
   ).run(
     data.whatsappMessageId,
-    data.groupKey,
     data.providerId,
     data.providerName,
-    data.medioPago,
+    JSON.stringify(data.medios),
     data.montoTotal,
     JSON.stringify(data.gastos),
     data.sinArqueo ? 1 : 0,
@@ -642,23 +640,26 @@ export function trackProveedorPendienteMessage(data: ProveedorPendienteTracking)
 }
 
 /**
- * Resuelve el mensaje reaccionado Y todo el grupo (los 3 medios de pago del
- * mismo proveedor/semana) de una sola vez -- atómico vía transacción, para
- * que dos reacciones casi simultáneas en mensajes distintos del mismo grupo
- * nunca disparen dos pagos. Devuelve los datos del mensaje reaccionado SOLO
- * si esta llamada fue la que resolvió el grupo (null si no había tracking,
- * o si el grupo ya estaba resuelto por otra reacción anterior).
+ * Resuelve el tracking del mensaje reaccionado SOLO si el emoji usado es
+ * uno de los medios de pago válidos para ese proveedor -- cualquier otro
+ * emoji (✅/❌/lo que sea) devuelve null sin tocar el tracking, queda
+ * pendiente igual que si no hubiera reaccionado nada. Atómico (UPDATE ...
+ * AND resolved = 0) para que dos reacciones casi simultáneas nunca
+ * disparen dos pagos. Devuelve `medioPago` ya resuelto (el valor del mapa
+ * `medios` para ese emoji) junto con el resto del tracking.
  */
-export function resolveProveedorPendienteGroup(whatsappMessageId: string): ProveedorPendienteTracking | null {
+export function resolveProveedorPendiente(
+  whatsappMessageId: string,
+  emoji: string,
+): (ProveedorPendienteTracking & { medioPago: string }) | null {
   const row = db
     .prepare('SELECT * FROM proveedor_pendiente_tracking WHERE whatsapp_message_id = ?')
     .get(whatsappMessageId) as
     | {
         whatsapp_message_id: string;
-        group_key: string;
         provider_id: string;
         provider_name: string;
-        medio_pago: string;
+        medios_json: string;
         monto_total: number;
         gastos_json: string;
         sin_arqueo: number;
@@ -667,20 +668,21 @@ export function resolveProveedorPendienteGroup(whatsappMessageId: string): Prove
     | undefined;
   if (!row) return null;
 
-  const resolverGrupo = db.transaction((groupKey: string) => {
-    return db
-      .prepare('UPDATE proveedor_pendiente_tracking SET resolved = 1 WHERE group_key = ? AND resolved = 0')
-      .run(groupKey);
-  });
-  const result = resolverGrupo(row.group_key);
+  const medios = JSON.parse(row.medios_json) as Record<string, string>;
+  const medioPago = medios[emoji];
+  if (!medioPago) return null; // emoji no es uno de los medios de pago de este mensaje
+
+  const result = db
+    .prepare('UPDATE proveedor_pendiente_tracking SET resolved = 1 WHERE whatsapp_message_id = ? AND resolved = 0')
+    .run(whatsappMessageId);
   if (result.changes === 0) return null; // ya lo había resuelto otra reacción
 
   return {
     whatsappMessageId: row.whatsapp_message_id,
-    groupKey: row.group_key,
     providerId: row.provider_id,
     providerName: row.provider_name,
-    medioPago: row.medio_pago,
+    medios,
+    medioPago,
     montoTotal: row.monto_total,
     gastos: JSON.parse(row.gastos_json),
     sinArqueo: Boolean(row.sin_arqueo),

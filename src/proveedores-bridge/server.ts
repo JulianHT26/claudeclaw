@@ -5,9 +5,17 @@
  *
  * davincheese-os calcula la deuda real semanal (apps/worker/src/proveedores-pendientes.ts,
  * corre solo, nunca escribe nada en Fudo) y publica UN mensaje de WhatsApp
- * por proveedor/medio de pago acá (POST /proveedor-pendiente, 3 medios:
- * Efectivo/Bancolombia/Datafono bold). El usuario reacciona ✅ al medio que
- * usó -- este puente ejecuta scripts/fudo-web/pagar_proveedor.py directo.
+ * por proveedor acá (POST /proveedor-pendiente), listando los 3 medios de
+ * pago reales con un emoji distinto cada uno. El usuario reacciona con el
+ * emoji del medio que usó, directo sobre ese único mensaje -- este puente
+ * ejecuta scripts/fudo-web/pagar_proveedor.py directo con ese medio.
+ *
+ * Corrección 2026-09-09 (probado en vivo por el usuario): la primera
+ * versión mandaba 3 mensajes idénticos por proveedor (uno por medio de
+ * pago, todos reaccionables con ✅) -- confuso, se veía como el mismo gasto
+ * pegado 3 veces. Ahora es un solo mensaje/tracking por proveedor; el
+ * medio de pago se resuelve por CUÁL de los 3 emoji se usó, no por A CUÁL
+ * de 3 mensajes se reaccionó.
  *
  * Distinto de comprobantes-bridge (que solo avisa de vuelta a davincheese-os
  * y deja que ESE lado actúe): acá la ejecución del pago vive en este mismo
@@ -22,11 +30,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 
 import { logger } from '../orchestrator/logger.js';
-import {
-  trackProveedorPendienteMessage,
-  resolveProveedorPendienteGroup,
-  type ProveedorPendienteTracking,
-} from '../orchestrator/db.js';
+import { trackProveedorPendienteMessage, resolveProveedorPendiente } from '../orchestrator/db.js';
 import type { Channel, ReactionEvent } from '../orchestrator/types.js';
 import {
   PROVEEDORES_CHAT_JID,
@@ -36,12 +40,6 @@ import {
 } from '../orchestrator/config.js';
 
 const execFileAsync = promisify(execFile);
-
-// Solo ✅ dispara el pago -- cualquier otro emoji (❌ incluido) no hace nada,
-// a propósito: el usuario pidió que quede pendiente indefinidamente hasta
-// que reaccione ✅ a alguno de los 3 medios, sin vencimiento ni segunda
-// confirmación (la reacción ES la confirmación).
-const EMOJIS_APRUEBA = new Set(['✅', '✔️', '☑️']);
 
 const PAGO_SCRIPT_TIMEOUT_MS = 90_000;
 
@@ -127,22 +125,28 @@ async function correrPagoScript(
 }
 
 /**
- * Ejecuta el pago completo del grupo: dry-run + confirmar por CADA gasto,
- * secuencial (un solo Chromium a la vez -- nunca en paralelo). Si cualquier
- * gasto falla en el dry-run o el guardado, aborta ahí mismo (no sigue con
- * los gastos restantes del mismo proveedor) -- mejor un pago parcial
- * reportado con claridad que seguir adivinando sobre un estado inesperado.
+ * Ejecuta el pago completo del proveedor con el medio elegido: dry-run +
+ * confirmar por CADA gasto, secuencial (un solo Chromium a la vez -- nunca
+ * en paralelo). Si cualquier gasto falla en el dry-run o el guardado,
+ * aborta ahí mismo (no sigue con los gastos restantes) -- mejor un pago
+ * parcial reportado con claridad que seguir adivinando sobre un estado
+ * inesperado.
  */
-async function ejecutarPagoCompleto(tracking: ProveedorPendienteTracking): Promise<{ okTodos: boolean; resumen: string }> {
+async function ejecutarPagoCompleto(
+  providerName: string,
+  medioPago: string,
+  sinArqueo: boolean,
+  gastos: Gasto[],
+): Promise<{ okTodos: boolean; resumen: string }> {
   const lineas: string[] = [];
-  for (const gasto of tracking.gastos) {
-    const dry = await correrPagoScript(tracking.providerName, gasto, tracking.medioPago, tracking.sinArqueo, false);
+  for (const gasto of gastos) {
+    const dry = await correrPagoScript(providerName, gasto, medioPago, sinArqueo, false);
     if (!dry.ok) {
       lineas.push(`❌ Gasto ${gasto.fechaDdMmAaaa} (${formatearCop(gasto.amount)}): falló la verificación, no se guardó nada.\n${dry.output.slice(-600)}`);
       return { okTodos: false, resumen: lineas.join('\n\n') };
     }
 
-    const real = await correrPagoScript(tracking.providerName, gasto, tracking.medioPago, tracking.sinArqueo, true);
+    const real = await correrPagoScript(providerName, gasto, medioPago, sinArqueo, true);
     if (!real.ok) {
       lineas.push(
         `⚠️ Gasto ${gasto.fechaDdMmAaaa} (${formatearCop(gasto.amount)}): la verificación pasó pero el guardado falló -- revisar a mano en Fudo antes de reintentar.\n${real.output.slice(-600)}`,
@@ -162,22 +166,24 @@ function wireReactionListener(whatsapp: Channel): void {
   }
   whatsapp.onReaction((evt: ReactionEvent) => {
     if (evt.chatJid !== PROVEEDORES_CHAT_JID) return; // no es el chat de proveedores, se ignora
-    if (!EMOJIS_APRUEBA.has(evt.emoji)) return; // ❌ u otro emoji: no hace nada, queda pendiente
 
-    const tracking = resolveProveedorPendienteGroup(evt.targetMessageId);
-    if (!tracking) return; // no trackeado acá, o el grupo ya lo resolvió otra reacción antes
+    // resolveProveedorPendiente ya filtra por si el emoji es uno de los
+    // medios de pago válidos de ESTE mensaje -- cualquier otro emoji (✅,
+    // ❌, lo que sea) devuelve null acá sin tocar nada, queda pendiente.
+    const resuelto = resolveProveedorPendiente(evt.targetMessageId, evt.emoji);
+    if (!resuelto) return;
 
     (async () => {
-      await whatsapp.sendMessage(evt.chatJid, `⏳ Pagando *${tracking.providerName}* con *${tracking.medioPago}*...`);
-      const { okTodos, resumen } = await ejecutarPagoCompleto(tracking);
+      await whatsapp.sendMessage(evt.chatJid, `⏳ Pagando *${resuelto.providerName}* con *${resuelto.medioPago}*...`);
+      const { okTodos, resumen } = await ejecutarPagoCompleto(resuelto.providerName, resuelto.medioPago, resuelto.sinArqueo, resuelto.gastos);
       const cabecera = okTodos
-        ? `✅ *${tracking.providerName}* pagado con *${tracking.medioPago}* (${formatearCop(tracking.montoTotal)})`
-        : `❌ No se pudo completar el pago a *${tracking.providerName}* -- revisar antes de reintentar (no se toca de nuevo automáticamente).`;
+        ? `✅ *${resuelto.providerName}* pagado con *${resuelto.medioPago}* (${formatearCop(resuelto.montoTotal)})`
+        : `❌ No se pudo completar el pago a *${resuelto.providerName}* -- revisar antes de reintentar (no se toca de nuevo automáticamente).`;
       await whatsapp.sendMessage(evt.chatJid, `${cabecera}\n\n${resumen}`);
     })().catch((err) => {
-      logger.error({ err, providerId: tracking.providerId }, 'proveedores-bridge: fallo inesperado ejecutando el pago');
+      logger.error({ err, providerId: resuelto.providerId }, 'proveedores-bridge: fallo inesperado ejecutando el pago');
       whatsapp
-        .sendMessage(evt.chatJid, `❌ Fallo inesperado pagando *${tracking.providerName}* -- revisar logs.`)
+        .sendMessage(evt.chatJid, `❌ Fallo inesperado pagando *${resuelto.providerName}* -- revisar logs.`)
         .catch(() => {});
     });
   });
@@ -210,12 +216,11 @@ export function startProveedoresBridgeServer(
     let payload: {
       providerId?: string;
       providerName?: string;
-      medioPago?: string;
+      medios?: Record<string, string>;
       montoTotal?: number;
       gastos?: Gasto[];
       sinArqueo?: boolean;
       mensaje?: string;
-      groupKey?: string;
     };
     try {
       payload = JSON.parse(body);
@@ -226,13 +231,13 @@ export function startProveedoresBridgeServer(
     if (
       !payload.providerId ||
       !payload.providerName ||
-      !payload.medioPago ||
+      !payload.medios ||
+      Object.keys(payload.medios).length === 0 ||
       typeof payload.montoTotal !== 'number' ||
       !Array.isArray(payload.gastos) ||
       payload.gastos.length === 0 ||
       typeof payload.sinArqueo !== 'boolean' ||
-      !payload.mensaje ||
-      !payload.groupKey
+      !payload.mensaje
     ) {
       sendJson(res, 400, { error: 'Faltan campos requeridos' });
       return;
@@ -254,15 +259,14 @@ export function startProveedoresBridgeServer(
       }
       trackProveedorPendienteMessage({
         whatsappMessageId: messageId,
-        groupKey: payload.groupKey,
         providerId: payload.providerId,
         providerName: payload.providerName,
-        medioPago: payload.medioPago,
+        medios: payload.medios,
         montoTotal: payload.montoTotal,
         gastos: payload.gastos,
         sinArqueo: payload.sinArqueo,
       });
-      logger.info({ providerId: payload.providerId, medioPago: payload.medioPago, messageId }, 'Proveedor pendiente publicado');
+      logger.info({ providerId: payload.providerId, medios: Object.values(payload.medios), messageId }, 'Proveedor pendiente publicado');
       sendJson(res, 200, { ok: true });
     } catch (err) {
       logger.error({ err }, 'proveedores-bridge: fallo inesperado');

@@ -10,10 +10,11 @@ Mismo Ops Bridge que el resto de los reportes -- no llames a Fudo ni a Postgres 
 ## Diferencia clave con el resto de los reportes de este directorio
 
 **No vuelve con los datos en la respuesta.** Este comando solo confirma que el reporte se encoló
--- el reporte real (un mensaje de WhatsApp por proveedor con deuda real, uno por cada medio de
-pago: Efectivo/Bancolombia/Datafono bold) llega unos segundos después, publicado directo por el
-puente de proveedores. Es el mismo código que corre solo los lunes 9am (semana anterior) --
-`reports_proveedores_pendientes_rango_...` es "correlo ahora, con estas fechas", nada más.
+-- el reporte real (un mensaje de WhatsApp por proveedor con deuda real, listando los 3 medios de
+pago con su emoji: 💵 Efectivo / 🏦 Bancolombia / 💳 Datafono bold) llega unos segundos después,
+publicado directo por el puente de proveedores. Es el mismo código que corre solo los lunes 9am
+(semana anterior) -- `reports_proveedores_pendientes_rango_...` es "correlo ahora, con estas
+fechas", nada más.
 
 ## Cómo pedirlo
 
@@ -32,18 +33,19 @@ puente de proveedores. Es el mismo código que corre solo los lunes 9am (semana 
    { "ok": true, "mensaje": "Reporte encolado -- los mensajes de WhatsApp llegan en los próximos segundos..." }
    ```
    Respondele al usuario en el momento algo como "Dale, ya te mando por acá la deuda de
-   proveedores del [rango] -- un mensaje por proveedor, reaccioná ✅ al medio de pago que
-   corresponda para registrar el pago." **No inventes ni resumas cifras vos** -- el detalle real
-   (proveedor, monto, gastos) llega en los mensajes que publica el puente, no en esta respuesta.
+   proveedores del [rango] -- un mensaje por proveedor, reaccioná con el emoji del medio que
+   usaste (💵/🏦/💳) para registrar el pago." **No inventes ni resumas cifras vos** -- el detalle
+   real (proveedor, monto, gastos) llega en los mensajes que publica el puente, no en esta
+   respuesta.
 
 ## Qué pasa después (para que puedas explicárselo al usuario si pregunta)
 
-- Un mensaje por proveedor con deuda real esa semana **por cada uno de los 3 medios de pago**
-  (Efectivo, Bancolombia, Datafono bold) -- reaccionar ✅ al que corresponda registra el pago real
-  en Fudo (ejecuta el mismo script que ya usa `pago-proveedores` a mano, con verificación antes de
-  guardar).
-- Reaccionar con cualquier otro emoji, o no reaccionar, **no hace nada** -- el proveedor queda
-  pendiente sin vencimiento, se puede resolver en cualquier momento futuro.
+- **Un solo mensaje por proveedor** con deuda real en el rango, listando los 3 medios de pago con
+  su emoji -- reaccionar con el emoji del medio que corresponda, directo sobre ese mensaje,
+  registra el pago real en Fudo con ese medio (ejecuta el mismo script que ya usa
+  `pago-proveedores` a mano, con verificación antes de guardar).
+- Reaccionar con cualquier otro emoji (✅/❌ incluidos), o no reaccionar, **no hace nada** -- el
+  proveedor queda pendiente sin vencimiento, se puede resolver en cualquier momento futuro.
 - Si el rango pedido no tiene ningún proveedor con deuda real, no llega ningún mensaje -- si el
   usuario pregunta y no le llegó nada, es esperable, no un error.
 
