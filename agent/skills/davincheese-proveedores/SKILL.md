@@ -1,35 +1,18 @@
 ---
 name: davincheese-proveedores
-description: Publica en WhatsApp la deuda real de proveedores de Da Vincheese para un rango de fechas específico -- exactamente el mismo reporte que ya llega solo todos los lunes 9am, pero bajo pedido y con las fechas que el usuario quiera. Usar ante "sacame la deuda de proveedores del X al Y", "cuánto le debemos a los proveedores entre el X y el Y", "corré el reporte de proveedores de esta semana/del mes pasado", o cualquier pedido de revisar pagos pendientes a proveedores fuera del ciclo semanal automático.
+description: Consulta y publica en WhatsApp la deuda real de proveedores de Da Vincheese para un rango de fechas específico, en 2 pasos (resumen primero, publicar los mensajes de pago después de confirmar). Usar ante "cuánto debo a proveedores del X al Y", "sacame la deuda de proveedores del X al Y", "cuánto le debemos a los proveedores entre el X y el Y", "corré el reporte de proveedores de esta semana/del mes pasado", o cualquier pedido de revisar pagos pendientes a proveedores fuera del ciclo semanal automático.
 ---
 
-# Proveedores pendientes de pago (rango libre, bajo pedido)
+# Proveedores pendientes de pago (rango libre, en 2 pasos)
 
 Mismo Ops Bridge que el resto de los reportes -- no llames a Fudo ni a Postgres directo.
 
-## ⚠️ Regla no negociable -- leer antes de responder nada
+Flujo en 2 pasos (pedido explícito del usuario 2026-09-09, ver
+`decisions/2026-09-09-cron-pago-proveedores.md` en davincheese-os): primero un **resumen** con el
+dato real y fresco de este pedido puntual, después -- solo si el usuario confirma -- se **publica**
+el reporte real (un mensaje por proveedor, reaccionable, dispara el pago).
 
-**Tu única respuesta de chat para este pedido es la confirmación corta de la sección "Cómo
-pedirlo", punto 5 -- nunca una tabla, nunca una lista de proveedores, nunca un monto, ni siquiera
-un total.** No importa si "sabés" los números de un rato antes en esta misma conversación, de
-`memory_search`, o de cualquier otro lado -- **esos números pueden estar viejos o ser de un rango
-distinto al que se pidió ahora**, y afirmarlos vos genera exactamente el tipo de error que ya pasó
-una vez (un total mal calculado por reusar datos de otro momento). El reporte real, con los
-números correctos de ESTE pedido, lo arma y publica el puente de proveedores en mensajes
-separados -- ese es el único lugar del que salen cifras. Si el usuario pregunta algo sobre montos
-después de pedir el reporte, remitilo a esos mensajes ("fijate en los mensajes que te acabo de
-mandar"), no se lo respondas vos de memoria.
-
-## Diferencia clave con el resto de los reportes de este directorio
-
-**No vuelve con los datos en la respuesta.** Este comando solo confirma que el reporte se encoló
--- el reporte real (un mensaje de WhatsApp por proveedor con deuda real, listando los 3 medios de
-pago con su emoji: 💵 Efectivo / 🏦 Bancolombia / 💳 Datafono bold) llega unos segundos después,
-publicado directo por el puente de proveedores. Es el mismo código que corre solo los lunes 9am
-(semana anterior) -- `reports_proveedores_pendientes_rango_...` es "correlo ahora, con estas
-fechas", nada más.
-
-## Cómo pedirlo
+## Paso 1 -- Resumen (siempre primero, nunca te saltees este paso)
 
 1. Identificá el rango de fechas exacto que pide el usuario (YYYY-MM-DD, ambas inclusive). Si no
    queda claro qué rango quiere ("esta semana" es ambiguo: ¿lunes-hoy, o los últimos 7 días?),
@@ -37,40 +20,56 @@ fechas", nada más.
    `davincheese-ventas`.
 2. Generá un id único.
 3. Escribí `/workspace/project/ops/requests/<id>.json` con
-   `{"cmd": "reports_proveedores_pendientes_rango_<desde>_<hasta>"}` (ej.
-   `reports_proveedores_pendientes_rango_2026-08-01_2026-08-15`).
-4. Esperá `/workspace/project/ops/results/<id>.json` -- normalmente rápido (~5s, es solo encolar
-   un job, no esperar a que Fudo responda).
+   `{"cmd": "reports_proveedores_pendientes_resumen_rango_<desde>_<hasta>"}` (ej.
+   `reports_proveedores_pendientes_resumen_rango_2026-08-01_2026-08-15`).
+4. Esperá `/workspace/project/ops/results/<id>.json` -- puede tardar hasta ~20s (reconcilia cada
+   proveedor con deuda contra su historial completo en Fudo, no es instantáneo).
 5. El `stdout` trae:
    ```json
-   { "ok": true, "mensaje": "Reporte encolado -- los mensajes de WhatsApp llegan en los próximos segundos..." }
+   {
+     "rango": { "desde": "...", "hasta": "..." },
+     "proveedores": [{ "nombre": "...", "monto": 568642, "montoFmt": "$568.642", "gastos": 6 }, ...],
+     "total": 3010338,
+     "totalFmt": "$3.010.338"
+   }
    ```
-   Respondele al usuario en el momento algo como "Dale, ya te mando por acá la deuda de
-   proveedores del [rango] -- un mensaje por proveedor, reaccioná con el emoji del medio que
-   usaste (💵/🏦/💳) para registrar el pago." **No inventes ni resumas cifras vos** -- el detalle
-   real (proveedor, monto, gastos) llega en los mensajes que publica el puente, no en esta
-   respuesta.
+   **Este es el ÚNICO dato del que podés armar una tabla o resumen** -- fresco, de este pedido
+   puntual, nunca inventado ni reusado de otro momento. Mostrale al usuario una tabla con
+   proveedor/monto (podés usar `montoFmt`/`totalFmt` directo) y preguntale explícitamente si
+   quiere que le mandes los mensajes individuales para poder registrar los pagos reaccionando.
+   **No sigas al paso 2 sin que el usuario diga que sí** -- no asumas.
+   - Si `proveedores` viene vacío: no hay deuda real en ese rango, decíselo y no hay nada más que
+     hacer (no hace falta el paso 2).
 
-## Qué pasa después (para que puedas explicárselo al usuario si pregunta)
+## Paso 2 -- Publicar (solo si el usuario confirmó que quiere pagar)
 
-- **Un solo mensaje por proveedor** con deuda real en el rango, listando los 3 medios de pago con
-  su emoji -- reaccionar con el emoji del medio que corresponda, directo sobre ese mensaje,
-  registra el pago real en Fudo con ese medio (ejecuta el mismo script que ya usa
-  `pago-proveedores` a mano, con verificación antes de guardar).
+1. Generá un id único nuevo.
+2. Escribí `/workspace/project/ops/requests/<id>.json` con
+   `{"cmd": "reports_proveedores_pendientes_rango_<desde>_<hasta>"}` (mismo desde/hasta del paso
+   1 -- sin `resumen_` en el nombre del comando esta vez).
+3. Esperá el resultado (rápido, ~5s -- solo encola el job de publicar, no espera a que termine).
+4. El `stdout` trae `{"ok": true, "mensaje": "..."}`. Respondele al usuario algo como "Dale, ya te
+   mando los mensajes -- reaccioná con el emoji del medio que usaste (💵 Efectivo / 🏦 Bancolombia
+   / 💳 Datafono bold) en cada uno para registrar el pago." **No repitas la tabla del paso 1 acá**
+   -- los mensajes que están por llegar ya tienen el detalle.
+
+## Qué pasa después de publicar (para que puedas explicárselo al usuario si pregunta)
+
+- **Un solo mensaje por proveedor**, listando los 3 medios de pago con su emoji -- reaccionar con
+  el emoji del medio que corresponda, directo sobre ese mensaje, registra el pago real en Fudo con
+  ese medio (ejecuta el mismo script que ya usa `pago-proveedores` a mano, con verificación antes
+  de guardar).
 - Reaccionar con cualquier otro emoji (✅/❌ incluidos), o no reaccionar, **no hace nada** -- el
   proveedor queda pendiente sin vencimiento, se puede resolver en cualquier momento futuro.
-- Si el rango pedido no tiene ningún proveedor con deuda real, no llega ningún mensaje -- si el
-  usuario pregunta y no le llegó nada, es esperable, no un error.
 
 ## No hacer
 
-- No calcules ni afirmes montos de deuda vos mismo -- ni con este comando ni con ningún otro, la
-  única fuente es este reporte (o `pago-proveedores` en una sesión de Claude Code sobre el repo).
-- **No armes una tabla, lista, ni resumen de proveedores/montos como respuesta de chat** -- ni
-  ahora ni si el usuario te pregunta después "¿cuánto era en total?". Los mensajes que publicó el
-  puente ya tienen esa información, remitilo ahí.
-- **No reuses cifras de este mismo chat, de `memory_search`, ni de ningún reporte anterior** para
-  contestar sobre este pedido -- aunque te "suenen" correctas, pueden ser de otro rango de fechas
-  o de otro momento. Causaron un error real ya una vez.
-- No confundas esto con el pago en sí -- este comando solo publica el reporte, el pago lo dispara
-  la reacción del usuario, nunca este comando por sí solo.
+- **No te saltees el paso 1.** Nunca llames directo al comando de publicar sin haber mostrado
+  antes el resumen y recibido una confirmación explícita.
+- **No armes una tabla/resumen/total con datos que no vengan del `stdout` del paso 1 de ESTE
+  pedido.** Nunca reuses cifras de este mismo chat, de `memory_search`, ni de un pedido anterior
+  (aunque el rango de fechas parezca el mismo) -- pueden estar desactualizadas o ser de otro
+  cálculo. Ya causó un error real dos veces: un total mal calculado y una tabla con datos viejos
+  quietos de un pedido anterior. Cada pedido nuevo corre el paso 1 de nuevo, sin excepción.
+- No confundas el paso 1 con el pago en sí -- el resumen no publica nada ni mueve dinero, el pago
+  lo dispara la reacción del usuario después del paso 2, nunca antes.
