@@ -174,3 +174,23 @@ export const DEFAULT_RUNTIME: 'container' | 'sandbox' =
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// Aviso por WhatsApp cuando una integración de redes sociales de
+// davincheese-os necesita reconexión (ver src/redes-sociales-bridge/server.ts,
+// Fase 4 de decisions/2026-09-11-motor-propio-redes-sociales.md en ese repo).
+// Reusa el mismo destino que proveedores pendientes (chat personal de Julian,
+// PROVEEDORES_CHAT_JID) -- mismo criterio de "esto necesita tu atención
+// ahora", sin crear un JID nuevo para esto.
+const redesSocialesBridgeEnv = readEnvFile([
+  'REDES_SOCIALES_BRIDGE_PORT',
+  'REDES_SOCIALES_BRIDGE_SECRET',
+  'PROVEEDORES_CHAT_JID',
+]);
+export const REDES_SOCIALES_BRIDGE_PORT = parseInt(
+  process.env.REDES_SOCIALES_BRIDGE_PORT || redesSocialesBridgeEnv.REDES_SOCIALES_BRIDGE_PORT || '3104',
+  10,
+);
+export const REDES_SOCIALES_BRIDGE_SECRET =
+  process.env.REDES_SOCIALES_BRIDGE_SECRET || redesSocialesBridgeEnv.REDES_SOCIALES_BRIDGE_SECRET || '';
+export const REDES_SOCIALES_ALERTAS_JID =
+  process.env.PROVEEDORES_CHAT_JID || redesSocialesBridgeEnv.PROVEEDORES_CHAT_JID || '';

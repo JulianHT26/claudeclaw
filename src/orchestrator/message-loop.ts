@@ -18,6 +18,8 @@ import {
   COMPROBANTES_BRIDGE_SECRET,
   PROVEEDORES_BRIDGE_PORT,
   PROVEEDORES_BRIDGE_SECRET,
+  REDES_SOCIALES_BRIDGE_PORT,
+  REDES_SOCIALES_BRIDGE_SECRET,
 } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
 import {
@@ -85,6 +87,7 @@ import { startWebhookServer } from '../webhook/server.js';
 import { startIaBridgeServer } from '../ia-bridge/server.js';
 import { startComprobantesBridgeServer } from '../comprobantes-bridge/server.js';
 import { startProveedoresBridgeServer } from '../proveedores-bridge/server.js';
+import { startRedesSocialesBridgeServer } from '../redes-sociales-bridge/server.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -840,6 +843,18 @@ export async function main(): Promise<void> {
       startProveedoresBridgeServer(PROVEEDORES_BRIDGE_PORT, PROVEEDORES_BRIDGE_SECRET, whatsapp);
     } else {
       logger.warn('PROVEEDORES_BRIDGE_SECRET configurado pero el canal de WhatsApp no está activo -- omitiendo');
+    }
+  }
+
+  // Aviso de reconexión de redes sociales (davincheese-os) -- ver
+  // src/redes-sociales-bridge/server.ts. Mismo criterio que comprobantes:
+  // necesita el canal de WhatsApp ya conectado (sendMessage), no un agente.
+  if (REDES_SOCIALES_BRIDGE_SECRET) {
+    const whatsapp = channels.find((ch) => ch.name === 'whatsapp');
+    if (whatsapp) {
+      startRedesSocialesBridgeServer(REDES_SOCIALES_BRIDGE_PORT, REDES_SOCIALES_BRIDGE_SECRET, whatsapp);
+    } else {
+      logger.warn('REDES_SOCIALES_BRIDGE_SECRET configurado pero el canal de WhatsApp no está activo -- omitiendo');
     }
   }
 
