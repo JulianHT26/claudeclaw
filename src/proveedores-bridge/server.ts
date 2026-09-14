@@ -30,7 +30,13 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 
 import { logger } from '../orchestrator/logger.js';
-import { trackProveedorPendienteMessage, resolveProveedorPendiente } from '../orchestrator/db.js';
+import {
+  trackProveedorPendienteMessage,
+  claimProveedorPendiente,
+  finishProveedorPendienteExito,
+  finishProveedorPendienteFallo,
+  releaseProveedorPendienteClaim,
+} from '../orchestrator/db.js';
 import type { Channel, ReactionEvent } from '../orchestrator/types.js';
 import {
   PROVEEDORES_CHAT_JID,
@@ -204,13 +210,14 @@ async function ejecutarPagoCompleto(
   medioPago: string,
   sinArqueo: boolean,
   gastos: Gasto[],
-): Promise<{ okTodos: boolean; resumen: string }> {
+): Promise<{ okTodos: boolean; resumen: string; pagados: Gasto[] }> {
   const lineas: string[] = [];
+  const pagados: Gasto[] = [];
   for (const gasto of gastos) {
     const dry = await correrPagoScript(providerName, gasto, medioPago, sinArqueo, false);
     if (!dry.ok) {
       lineas.push(`❌ Gasto ${gasto.fechaDdMmAaaa} (${formatearCop(gasto.amount)}): falló la verificación, no se guardó nada.\n${dry.output.slice(-600)}`);
-      return { okTodos: false, resumen: lineas.join('\n\n') };
+      return { okTodos: false, resumen: lineas.join('\n\n'), pagados };
     }
 
     const real = await correrPagoScript(providerName, gasto, medioPago, sinArqueo, true);
@@ -218,7 +225,7 @@ async function ejecutarPagoCompleto(
       lineas.push(
         `⚠️ Gasto ${gasto.fechaDdMmAaaa} (${formatearCop(gasto.amount)}): la verificación pasó pero el guardado falló -- revisar a mano en Fudo antes de reintentar.\n${real.output.slice(-600)}`,
       );
-      return { okTodos: false, resumen: lineas.join('\n\n') };
+      return { okTodos: false, resumen: lineas.join('\n\n'), pagados };
     }
 
     // El script pensó que guardó (exit 0), pero eso solo mide si el panel
@@ -230,16 +237,17 @@ async function ejecutarPagoCompleto(
       lineas.push(
         `❌ Gasto ${gasto.fechaDdMmAaaa} (${formatearCop(gasto.amount)}): el script dijo que guardó, pero Fudo lo sigue mostrando SIN pagar -- no se cuenta como pagado, revisar a mano antes de reintentar.`,
       );
-      return { okTodos: false, resumen: lineas.join('\n\n') };
+      return { okTodos: false, resumen: lineas.join('\n\n'), pagados };
     }
     if (verificado === 'no_verificable') {
       lineas.push(
         `⚠️ Gasto ${gasto.fechaDdMmAaaa} (${formatearCop(gasto.amount)}): el script dijo que guardó, pero no se pudo verificar contra Fudo (FUDO_API_KEY/SECRET o la API no respondieron) -- confirmá a mano antes de asumir que quedó pagado.`,
       );
-      return { okTodos: false, resumen: lineas.join('\n\n') };
+      return { okTodos: false, resumen: lineas.join('\n\n'), pagados };
     }
 
     lineas.push(`✅ Gasto ${gasto.fechaDdMmAaaa} (${formatearCop(gasto.amount)}) pagado -- verificado contra Fudo.`);
+    pagados.push(gasto);
 
     // Pausa corta antes del próximo gasto -- hallazgo real 2026-09-09: un
     // gasto recién pagado a veces no aparecía todavía en el multiselect de
@@ -248,7 +256,7 @@ async function ejecutarPagoCompleto(
     // no había terminado de propagar el cambio anterior.
     await new Promise((r) => setTimeout(r, 2000));
   }
-  return { okTodos: true, resumen: lineas.join('\n') };
+  return { okTodos: true, resumen: lineas.join('\n'), pagados };
 }
 
 function wireReactionListener(whatsapp: Channel): void {
@@ -259,23 +267,44 @@ function wireReactionListener(whatsapp: Channel): void {
   whatsapp.onReaction((evt: ReactionEvent) => {
     if (evt.chatJid !== PROVEEDORES_CHAT_JID) return; // no es el chat de proveedores, se ignora
 
-    // resolveProveedorPendiente ya filtra por si el emoji es uno de los
-    // medios de pago válidos de ESTE mensaje -- cualquier otro emoji (✅,
-    // ❌, lo que sea) devuelve null acá sin tocar nada, queda pendiente.
-    const resuelto = resolveProveedorPendiente(evt.targetMessageId, evt.emoji);
-    if (!resuelto) return;
+    // claimProveedorPendiente ya filtra por si el emoji es uno de los
+    // medios de pago válidos de ESTE mensaje, y si ya está resuelto o hay
+    // un intento corriendo -- cualquier otro caso devuelve null acá sin
+    // tocar nada. A diferencia del viejo resolveProveedorPendiente, esto
+    // NO marca resuelto -- eso queda para cuando se sepa el resultado real
+    // (ver finishProveedorPendienteExito/Fallo abajo), así una reacción
+    // nueva después de un fallo sí puede reintentar.
+    const claimed = claimProveedorPendiente(evt.targetMessageId, evt.emoji);
+    if (!claimed) return;
 
     (async () => {
-      await whatsapp.sendMessage(evt.chatJid, `⏳ Pagando *${resuelto.providerName}* con *${resuelto.medioPago}*...`);
-      const { okTodos, resumen } = await ejecutarPagoCompleto(resuelto.providerName, resuelto.medioPago, resuelto.sinArqueo, resuelto.gastos);
+      await whatsapp.sendMessage(evt.chatJid, `⏳ Pagando *${claimed.providerName}* con *${claimed.medioPago}*...`);
+      const { okTodos, resumen, pagados } = await ejecutarPagoCompleto(claimed.providerName, claimed.medioPago, claimed.sinArqueo, claimed.gastos);
+
+      if (okTodos) {
+        finishProveedorPendienteExito(claimed.whatsappMessageId);
+      } else {
+        // Solo se reintentan los gastos que NO quedaron pagados en este
+        // intento -- nunca se vuelve a atacar uno ya verificado contra
+        // Fudo (evita repetir trabajo y evita el riesgo de reprocesar un
+        // gasto que Fudo ya no muestra como pendiente).
+        const idsPagados = new Set(pagados.map((g) => g.fudoId));
+        const restantes = claimed.gastos.filter((g) => !idsPagados.has(g.fudoId));
+        finishProveedorPendienteFallo(claimed.whatsappMessageId, restantes);
+      }
+
       const cabecera = okTodos
-        ? `✅ *${resuelto.providerName}* pagado con *${resuelto.medioPago}* (${formatearCop(resuelto.montoTotal)})`
-        : `❌ No se pudo completar el pago a *${resuelto.providerName}* -- revisar antes de reintentar (no se toca de nuevo automáticamente).`;
+        ? `✅ *${claimed.providerName}* pagado con *${claimed.medioPago}* (${formatearCop(claimed.montoTotal)})`
+        : `❌ No se pudo completar el pago a *${claimed.providerName}* -- revisá el detalle abajo. Reaccioná de nuevo con el mismo emoji para reintentar lo que quedó pendiente.`;
       await whatsapp.sendMessage(evt.chatJid, `${cabecera}\n\n${resumen}`);
     })().catch((err) => {
-      logger.error({ err, providerId: resuelto.providerId }, 'proveedores-bridge: fallo inesperado ejecutando el pago');
+      logger.error({ err, providerId: claimed.providerId }, 'proveedores-bridge: fallo inesperado ejecutando el pago');
+      // Excepción no controlada (no un fallo normal del pago) -- liberar el
+      // claim sin tocar gastos_json, para no arriesgarse a descartar
+      // gastos por error cuando no hay certeza de qué pasó realmente.
+      releaseProveedorPendienteClaim(claimed.whatsappMessageId);
       whatsapp
-        .sendMessage(evt.chatJid, `❌ Fallo inesperado pagando *${resuelto.providerName}* -- revisar logs.`)
+        .sendMessage(evt.chatJid, `❌ Fallo inesperado pagando *${claimed.providerName}* -- reaccioná de nuevo para reintentar. Revisar logs.`)
         .catch(() => {});
     });
   });

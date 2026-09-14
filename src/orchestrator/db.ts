@@ -112,6 +112,7 @@ function createSchema(
       gastos_json TEXT NOT NULL,
       sin_arqueo INTEGER NOT NULL,
       resolved INTEGER DEFAULT 0,
+      in_progress INTEGER DEFAULT 0,
       created_at TEXT NOT NULL
     );
 
@@ -166,6 +167,21 @@ function createSchema(
   try {
     database.exec(`ALTER TABLE registered_groups ADD COLUMN runtime TEXT`);
   } catch { /* column already exists */ }
+
+  // Add in_progress column if it doesn't exist (migration for existing DBs)
+  // -- separa "alguien está pagando esto ahora mismo" de "ya quedó resuelto
+  // para siempre", para poder reintentar por reacción tras un fallo (ver
+  // claimProveedorPendiente / finishProveedorPendienteFallo más abajo;
+  // hallazgo real 2026-09-14, Plaza Marce: antes `resolved` se marcaba
+  // apenas se reaccionaba, sin importar si el pago terminaba bien o mal,
+  // así que reaccionar de nuevo tras un fallo no hacía nada).
+  try {
+    database.exec(
+      `ALTER TABLE proveedor_pendiente_tracking ADD COLUMN in_progress INTEGER DEFAULT 0`,
+    );
+  } catch {
+    /* column already exists */
+  }
 
   // Add channel and is_group columns if they don't exist (migration for existing DBs)
   try {
@@ -640,15 +656,27 @@ export function trackProveedorPendienteMessage(data: ProveedorPendienteTracking)
 }
 
 /**
- * Resuelve el tracking del mensaje reaccionado SOLO si el emoji usado es
- * uno de los medios de pago válidos para ese proveedor -- cualquier otro
- * emoji (✅/❌/lo que sea) devuelve null sin tocar el tracking, queda
- * pendiente igual que si no hubiera reaccionado nada. Atómico (UPDATE ...
- * AND resolved = 0) para que dos reacciones casi simultáneas nunca
- * disparen dos pagos. Devuelve `medioPago` ya resuelto (el valor del mapa
- * `medios` para ese emoji) junto con el resto del tracking.
+ * Reclama atómicamente el pago de un proveedor pendiente para poder
+ * ejecutarlo -- SOLO si el emoji usado es uno de los medios de pago
+ * válidos para ese proveedor Y nadie más lo está corriendo ni ya quedó
+ * resuelto. Cualquier otro emoji (✅/❌/lo que sea) devuelve null sin
+ * tocar el tracking, igual que si no hubiera reaccionado nada.
+ *
+ * A diferencia de la versión anterior (`resolveProveedorPendiente`), esto
+ * NO marca `resolved` -- eso lo hacen `finishProveedorPendienteExito` /
+ * `finishProveedorPendienteFallo` recién cuando se sabe si el pago
+ * terminó bien o mal. Antes `resolved` se marcaba apenas se reaccionaba,
+ * sin importar el resultado, así que reaccionar de nuevo tras un fallo no
+ * hacía nada -- pese a que el mensaje de error invitaba a reintentar
+ * (hallazgo real 2026-09-14, Plaza Marce).
+ *
+ * Atómico vía `UPDATE ... WHERE resolved = 0 AND in_progress = 0` para
+ * que dos reacciones casi simultáneas, o una reacción mientras el intento
+ * anterior todavía está corriendo, nunca disparen dos pagos en paralelo.
+ * Devuelve `medioPago` ya resuelto (el valor del mapa `medios` para ese
+ * emoji) junto con el resto del tracking.
  */
-export function resolveProveedorPendiente(
+export function claimProveedorPendiente(
   whatsappMessageId: string,
   emoji: string,
 ): (ProveedorPendienteTracking & { medioPago: string }) | null {
@@ -664,6 +692,7 @@ export function resolveProveedorPendiente(
         gastos_json: string;
         sin_arqueo: number;
         resolved: number;
+        in_progress: number;
       }
     | undefined;
   if (!row) return null;
@@ -673,9 +702,11 @@ export function resolveProveedorPendiente(
   if (!medioPago) return null; // emoji no es uno de los medios de pago de este mensaje
 
   const result = db
-    .prepare('UPDATE proveedor_pendiente_tracking SET resolved = 1 WHERE whatsapp_message_id = ? AND resolved = 0')
+    .prepare(
+      'UPDATE proveedor_pendiente_tracking SET in_progress = 1 WHERE whatsapp_message_id = ? AND resolved = 0 AND in_progress = 0',
+    )
     .run(whatsappMessageId);
-  if (result.changes === 0) return null; // ya lo había resuelto otra reacción
+  if (result.changes === 0) return null; // ya resuelto, o ya hay un intento corriendo
 
   return {
     whatsappMessageId: row.whatsapp_message_id,
@@ -687,6 +718,42 @@ export function resolveProveedorPendiente(
     gastos: JSON.parse(row.gastos_json),
     sinArqueo: Boolean(row.sin_arqueo),
   };
+}
+
+/** El lote completo se pagó bien -- marca resuelto para siempre y libera el claim. */
+export function finishProveedorPendienteExito(whatsappMessageId: string): void {
+  db.prepare(
+    'UPDATE proveedor_pendiente_tracking SET resolved = 1, in_progress = 0 WHERE whatsapp_message_id = ?',
+  ).run(whatsappMessageId);
+}
+
+/**
+ * El lote falló (parcial o total) -- libera el claim (`in_progress = 0`)
+ * SIN marcar `resolved`, para que una reacción nueva pueda reintentar.
+ * `gastosRestantes` reemplaza `gastos_json`/`monto_total` para que ese
+ * reintento ataque solo lo que sigue pendiente, nunca repita un gasto que
+ * ya quedó pagado y verificado en este mismo intento.
+ */
+export function finishProveedorPendienteFallo(
+  whatsappMessageId: string,
+  gastosRestantes: { fudoId: string; fechaDdMmAaaa: string; amount: number }[],
+): void {
+  const montoRestante = gastosRestantes.reduce((sum, g) => sum + g.amount, 0);
+  db.prepare(
+    'UPDATE proveedor_pendiente_tracking SET in_progress = 0, gastos_json = ?, monto_total = ? WHERE whatsapp_message_id = ?',
+  ).run(JSON.stringify(gastosRestantes), montoRestante, whatsappMessageId);
+}
+
+/**
+ * Libera el claim sin tocar `gastos_json` -- para una excepción totalmente
+ * inesperada (no un fallo controlado del pago) donde no hay certeza de qué
+ * gastos quedaron pagados. Deja el lote original completo disponible para
+ * reintentar en vez de arriesgarse a descartar gastos por error.
+ */
+export function releaseProveedorPendienteClaim(whatsappMessageId: string): void {
+  db.prepare(
+    'UPDATE proveedor_pendiente_tracking SET in_progress = 0 WHERE whatsapp_message_id = ? AND resolved = 0',
+  ).run(whatsappMessageId);
 }
 
 // --- Registered group accessors ---
